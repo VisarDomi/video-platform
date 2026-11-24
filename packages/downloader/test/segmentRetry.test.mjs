@@ -302,3 +302,75 @@ test('a media flush failure keeps received bytes but cannot commit a playlist en
     assert.equal(await readFile(path.join(f.root,'0_recording_10.ts'),'utf8'),'received media');
     assert.equal((await readdir(f.root)).includes('playlist.m3u8'),false);
 });
+
+test('back-to-back sub-second disk steps across a batch still poll on the one-second schedule', { timeout: 15000 }, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'segment-retry-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const handle = { state: { alias: 'example' }, update(value) { Object.assign(this.state, value); } };
+    const disk = new DiskSession('example', handle, async () => root);
+    const manager = new PlaylistManager(disk, 'recording');
+    const tracker = new InitTracker(disk);
+    const started = Date.now();
+    const window = (first, count, ended = false) => `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${first}\n`
+        + Array.from({ length: count }, (_, i) => `#EXTINF:1,\ns${first + i}.ts\n`).join('') + (ended ? '#EXT-X-ENDLIST\n' : '');
+    // Window starts with 3 segments and slides forward every 1 s; each segment's check takes 600 ms
+    // (< 1000 ms individually, > 1.8 s combined). A per-step timer would miss s13.
+    const fetchPlaylist = async () => {
+        const elapsed = Date.now() - started;
+        return elapsed < 900 ? window(10, 3) : elapsed < 1900 ? window(12, 2) : window(14, 2, true);
+    };
+    const provider = {
+        providerName: 'live-a', refreshMasterDuringDownload: false,
+        parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
+        createDownloadSession: () => ({ fetchPlaylist, fetchSegment: async url => ({ data: Buffer.from(`unprobeable media: ${url}`) }) }),
+        validateSegment: async file => {
+            await new Promise(resolve => setTimeout(resolve, 600));
+            return validateTsSegment(file);
+        },
+    };
+    const result = await new StreamDownloader(handle, provider, new AccessIncidentTracker())
+        .run('https://example.test/master.m3u8', manager, tracker, disk);
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(manager.missedSegmentCount, 0);
+    const saved = await readFile(path.join(root, 'playlist.m3u8'), 'utf8');
+    assert.deepEqual(saved.split('\n').filter(line => line.endsWith('.ts')).map(line => line.split('_').at(-1)),
+        ['10.ts', '11.ts', '12.ts', '13.ts', '14.ts', '15.ts']);
+});
+
+test('a segment 404 after a new init map URL leaves no unreferenced init file on disk', async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'segment-retry-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const handle = { state: { alias: 'example' }, update(value) { Object.assign(this.state, value); } };
+    const disk = new DiskSession('example', handle, async () => root);
+    const manager = new PlaylistManager(disk, 'recording');
+    const tracker = new InitTracker(disk);
+    let step = 0;
+    const playlists = [
+        '#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:10\n#EXT-X-MAP:URI="init-v1.mp4"\n#EXTINF:2,\ns10.ts\n',
+        '#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:11\n#EXT-X-MAP:URI="init-v2.mp4"\n#EXTINF:2,\ns11.ts\n',
+        '#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:12\n#EXT-X-MAP:URI="init-v3.mp4"\n#EXTINF:2,\ns12.ts\n#EXT-X-ENDLIST\n',
+    ];
+    const provider = {
+        providerName: 'live-b', refreshMasterDuringDownload: false,
+        parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
+        createDownloadSession: () => ({
+            fetchPlaylist: async () => playlists[Math.min(step++, playlists.length - 1)],
+            fetchSegment: async url => {
+                if (url.endsWith('/init-v1.mp4')) return { data: Buffer.from('init-bytes-1') };
+                if (url.endsWith('/init-v2.mp4')) return { data: Buffer.from('init-bytes-2') };
+                if (url.endsWith('/init-v3.mp4')) return { data: Buffer.from('init-bytes-3') };
+                if (url.endsWith('/s11.ts')) return { data: null, retryable: false, status: 404 };
+                return { data: Buffer.from(`media:${url}`) };
+            },
+        }),
+        validateSegment: validateTsSegment,
+    };
+    const downloader1 = new StreamDownloader(handle, provider, new AccessIncidentTracker());
+    assert.equal((await downloader1.run('https://example.test/master.m3u8', manager, tracker, disk)).exitReason, 'segment-failed');
+    const downloader2 = new StreamDownloader(handle, provider, new AccessIncidentTracker());
+    assert.equal((await downloader2.run('https://example.test/master.m3u8', manager, tracker, disk)).exitReason, 'remote-endlist');
+    const files = (await readdir(root)).filter(name => name.startsWith('init')).sort();
+    const saved = await readFile(path.join(root, 'playlist.m3u8'), 'utf8');
+    const referencedInits = [...saved.matchAll(/#EXT-X-MAP:URI="([^"]+)"/g)].map(match => match[1]).sort();
+    assert.deepEqual(files, referencedInits);
+});

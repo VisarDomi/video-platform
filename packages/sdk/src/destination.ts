@@ -8,6 +8,20 @@ import { SDK_VERSION } from "./plugin.js";
 // daily verification, removal bans and receipt-matched cleanup; a destination plug-in
 // only speaks its site's protocol.
 
+// One video this ledger created at the destination and believes still exists.
+export interface RecentUpload {
+    readonly remoteId: string;
+    readonly recordingId: string;
+    readonly submittedAt: string;
+    // True once the destination's copy has been verified online; false while awaiting confirmation.
+    readonly verified?: boolean;
+}
+
+export interface UploadLookupContext {
+    readonly recentUploads?: readonly RecentUpload[];
+    readonly recordingId?: string;
+}
+
 export interface UploadRequest {
     readonly recordingId: string;
     // The text the destination is searched by: the "[...]" stamp at the end of the title.
@@ -22,12 +36,12 @@ export interface UploadRequest {
     // Search the destination for the identity first, inside the same session.
     readonly lookupBeforeUpload?: boolean;
     // This destination's videos the core created and believes still exist, newest first
-    // (the remote ID captured after submission, the recording, when); empty when an earlier
-    // submission of this recording has no captured ID. A destination whose uploads list
-    // comes up short of its own totals may account for the shortfall with the ones created
-    // recently (a new video can drop out of a list while the site processes it), never with
-    // a copy of this recording, and can name any older missing video for diagnosis.
-    readonly recentUploads?: readonly { readonly remoteId: string; readonly recordingId: string; readonly submittedAt: string }[];
+    // (the remote ID captured after submission, the recording, when, whether verified);
+    // empty when an earlier submission of this recording has no captured ID. A destination
+    // whose uploads list comes up short of its own totals may account for the shortfall with
+    // unverified recent uploads (a processing video can transiently drop out of a page),
+    // never with a copy of this recording, and can name any older missing video for diagnosis.
+    readonly recentUploads?: readonly RecentUpload[];
     // Evidence the core stores with the attempt (it may parse a destination's notices).
     readonly onEvidence?: (evidence: Record<string, unknown>) => Promise<void> | void;
     // Recorded durably by the core before the call returns; "metadata_submitting" is
@@ -84,8 +98,8 @@ export interface UploadProbe {
 
 // A signed-in session, opened once for a batch of lookups and probes.
 export interface DestinationSession {
-    lookup(identity: string, exactRemoteId?: string): Promise<UploadLookup>;
-    probe(remoteId: string): Promise<UploadProbe>;
+    lookup(identity: string, exactRemoteId?: string, context?: UploadLookupContext): Promise<UploadLookup>;
+    probe(remoteId: string, context?: UploadLookupContext): Promise<UploadProbe>;
 }
 
 // The state of the destination's stored login, from one light request. A network or

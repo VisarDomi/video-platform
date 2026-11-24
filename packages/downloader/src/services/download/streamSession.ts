@@ -69,7 +69,8 @@ export class StreamSession {
         const initTracker = new InitTracker(disk);
         if (this.existingDirPath) {
             await playlistManager.initializeFromExistingPlaylist((filePath) => this.provider.validateSegment(filePath));
-            initTracker.markResumeBoundary(playlistManager.nextSegmentNumber);
+            const existingInit = await playlistManager.activeInitMap();
+            initTracker.markResumeBoundary(playlistManager.nextSegmentNumber, existingInit?.bytes ?? null, existingInit?.fileName ?? null);
         }
 
         let masterUrl = initialMasterUrl;

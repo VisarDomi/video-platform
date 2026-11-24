@@ -144,21 +144,31 @@ export class StreamDownloader {
         return work.finally(() => record(Date.now() - startedAt));
     }
 
-    // Waits for a segment's download or disk work, polling the playlist each second meanwhile
-    // so segments listed in the meantime are queued before the live window drops them.
+    // Waits for a segment's download or disk work, polling the playlist on a shared
+    // schedule across the whole batch so back-to-back sub-second writes, checks and
+    // appends never let the live window move past unpolled segments.
     private async awaitPolling<T>(
         result: Promise<T>,
         poll: () => Promise<void>,
+        schedule: { nextPollAt: number },
     ): Promise<T> {
         while (true) {
+            const waitMs = schedule.nextPollAt - Date.now();
+            if (waitMs <= 0) {
+                if (this._aborted) return await result;
+                await poll();
+                schedule.nextPollAt = Date.now() + POLL_WHILE_WAITING_MS;
+                continue;
+            }
             const timer = new AbortController();
             const settled = await Promise.race([
                 result.then(() => true),
-                timersPromises.setTimeout(POLL_WHILE_WAITING_MS, false, { signal: timer.signal }).catch(() => false),
+                timersPromises.setTimeout(waitMs, false, { signal: timer.signal }).catch(() => false),
             ]);
             timer.abort();
             if (settled || this._aborted) return await result;
             await poll();
+            schedule.nextPollAt = Date.now() + POLL_WHILE_WAITING_MS;
         }
     }
 
@@ -422,31 +432,15 @@ export class StreamDownloader {
                 const mapUri = mapMatch[1];
                 if (initTracker.needsUpdate(mapUri)) {
                     const initUrl = resolveSegmentUrl(liveUrl, mapUri);
-                    let result;
-                    try {
-                        result = await initTracker.commitInit(
-                            mapUri,
-                            () => session.fetchSegment(initUrl),
-                            playlistManager.nextSegmentNumber,
-                        );
-                    } catch (error) {
-                        // Already logged by the write; the session decides what follows.
-                        if (!(error instanceof InitWriteError)) throw error;
-                        segmentFailed = true;
-                        break;
-                    }
-
-                    if (!result) {
+                    const staged = await initTracker.stageInit(mapUri, () => session.fetchSegment(initUrl));
+                    if (!staged) {
                         logger.debug(`[StreamDownloader] ${alias} init segment failed — retrying`);
                         await timersPromises.setTimeout(INIT_RETRY_SLEEP_MS);
                         continue;
                     }
-
-                    if (result.isQualityChange) {
-                        playlistManager.bufferQualityChange(result.fileName);
+                    if (staged === "staged") {
+                        logger.debug(`[StreamDownloader] Staged init segment for ${alias}`);
                     }
-
-                    logger.debug(`[StreamDownloader] Downloaded init segment for ${alias} (${result.fileName})`);
                 }
             }
 
@@ -487,10 +481,11 @@ export class StreamDownloader {
                 segments.push(...more);
                 prefetch.add(more);
             };
+            const pollSchedule = { nextPollAt: playlistFetchStartedAt + POLL_WHILE_WAITING_MS };
             try {
                 for (let index = 0; index < segments.length; index++) {
                     const segment = segments[index];
-                    const fetchResult = await this.awaitPolling(prefetch.result(index), pollWhileWaiting);
+                    const fetchResult = await this.awaitPolling(prefetch.result(index), pollWhileWaiting, pollSchedule);
                     if (this._aborted || (!fetchResult.data && fetchResult.retryable)) break downloadLoop;
 
                     if (!fetchResult.data) {
@@ -518,22 +513,39 @@ export class StreamDownloader {
                         // The disk can stall for seconds (a flush behind a large write elsewhere):
                         // the playlist is polled meanwhile, and the time is reported with a gap.
                         const slowest = (step: keyof typeof diskTimings) => (milliseconds: number) => { diskTimings[step] = Math.max(diskTimings[step], milliseconds); };
-                        if (!await this.awaitPolling(StreamDownloader.timed(disk.materialize(), slowest("write")), pollWhileWaiting)) {
+                        if (!await this.awaitPolling(StreamDownloader.timed(disk.materialize(), slowest("write")), pollWhileWaiting, pollSchedule)) {
                             logger.error(`[StreamDownloader] ${alias} disk materialization failed — stopping`);
                             segmentFailed = true;
                             break;
                         }
 
+                        // Commit any staged init map only once a real segment is ready to write.
+                        let committedInit;
+                        try {
+                            committedInit = await this.awaitPolling(StreamDownloader.timed(
+                                initTracker.flushPendingInit(segment.localNumber ?? playlistManager.nextSegmentNumber), slowest("write")), pollWhileWaiting, pollSchedule);
+                        } catch (error) {
+                            if (!(error instanceof InitWriteError)) throw error;
+                            segmentFailed = true;
+                            break;
+                        }
+                        if (committedInit?.isQualityChange) {
+                            playlistManager.bufferQualityChange(committedInit.fileName);
+                        }
+                        if (committedInit) {
+                            logger.debug(`[StreamDownloader] Downloaded init segment for ${alias} (${committedInit.fileName})`);
+                        }
+
                         const segmentPath = path.join(disk.dirPath, segment.localName);
                         const written = await this.awaitPolling(StreamDownloader.timed(
-                            FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array), slowest("write")), pollWhileWaiting);
+                            FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array), slowest("write")), pollWhileWaiting, pollSchedule);
                         if (written !== "written") {
                             logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
                             segmentFailed = true;
                             break;
                         }
 
-                        result = await this.awaitPolling(StreamDownloader.timed(this.provider.validateSegment(segmentPath), slowest("check")), pollWhileWaiting);
+                        result = await this.awaitPolling(StreamDownloader.timed(this.provider.validateSegment(segmentPath), slowest("check")), pollWhileWaiting, pollSchedule);
                         // Received bytes are never deleted; an unreadable file
                         // stays on disk and finalization reports it.
                         if (!result.valid) rejection = "unreadable-after-write";
@@ -565,7 +577,7 @@ export class StreamDownloader {
                             segment.accurateDuration = result.duration;
                         }
                         await this.awaitPolling(StreamDownloader.timed(playlistManager.appendSegmentToPlaylist(segment),
-                            milliseconds => { diskTimings.append = Math.max(diskTimings.append, milliseconds); }), pollWhileWaiting);
+                            milliseconds => { diskTimings.append = Math.max(diskTimings.append, milliseconds); }), pollWhileWaiting, pollSchedule);
                         if (fetchResult.repair) {
                             logger.info(`[StreamDownloader] ${alias} repaired segment ${segment.localName}: ${fetchResult.repair}`);
                         }

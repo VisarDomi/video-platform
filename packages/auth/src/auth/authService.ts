@@ -10,8 +10,9 @@ import type { Account } from "../accounts.js";
 
 const AUTH_LOGIN_RETRY_MS = 30_000;
 const SHORT_REFRESH_RETRY_MS = 1_000;
-// A refresh unanswered after this long gets a second, parallel request.
-const SHORT_REFRESH_HEDGE_MS = 1_000;
+// A refresh unanswered after these delays gets parallel hedge requests so brief
+// DNS or transport stalls do not let a 10-second stream token lapse.
+const SHORT_REFRESH_HEDGE_MS = [1_000, 3_000] as const;
 // A short-lived-token request otherwise (the token it renews may live only seconds).
 const SHORT_TOKEN_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -212,13 +213,25 @@ export class AuthService {
         if (!hedged) {
             result = await first;
         } else {
-            let answered = false;
-            first.then(() => { answered = true; }, () => { answered = true; });
-            const second = timersPromises.setTimeout(SHORT_REFRESH_HEDGE_MS).then(() => answered ? first : attempt());
+            let settled = false;
+            const cancelHedges = new AbortController();
+            const track = (promise: Promise<ShortTokens>, abortOnReject = false) => promise.then(
+                value => { settled = true; cancelHedges.abort(); return value; },
+                error => { if (abortOnReject) { settled = true; cancelHedges.abort(); } throw error; },
+            );
+            const attempts: Promise<ShortTokens>[] = [track(first, true)];
+            for (const delayMs of SHORT_REFRESH_HEDGE_MS) {
+                attempts.push(
+                    timersPromises.setTimeout(delayMs, undefined, { signal: cancelHedges.signal })
+                        .then(() => settled ? first : track(attempt()), () => first),
+                );
+            }
             try {
-                result = await Promise.any([first, second]);
+                result = await Promise.any(attempts);
             } catch (error) {
                 throw error instanceof AggregateError ? error.errors[0] : error;
+            } finally {
+                cancelHedges.abort();
             }
         }
         const current = this.authContext.getTokenBag();
@@ -252,7 +265,16 @@ export class AuthService {
             const startedAt = Date.now();
             try {
                 await this.setTokenData(true);
+                const fetchedAt = Date.now();
                 await this.authContext.saveTokenToFile();
+                const savedAt = Date.now();
+                const fetchMs = fetchedAt - startedAt;
+                const saveMs = savedAt - fetchedAt;
+                const totalMs = savedAt - startedAt;
+                if (totalMs >= Math.round(this.provider.intervals.shortTokenRefresh * 0.6)) {
+                    const bag = this.authContext.getTokenBag();
+                    this.siteLog.warn(`Slow short-refresh for ${this.account.email}: total=${totalMs}ms (fetch=${fetchMs}ms, save=${saveMs}ms) — ${bag ? this.provider.describeTokens(bag).summary : this.noTokensSummary()}`);
+                }
                 consecutiveOk++;
                 if (!wasHealthy) {
                     const bag = this.authContext.getTokenBag();

@@ -2387,14 +2387,15 @@ export class PipelineDatabase {
     // newest first: accepted or awaiting confirmation, with the remote ID captured after
     // submission, never one the destination removed; one entry per remote ID. Accepted rows
     // use started_at because completed_at is updated on later verification.
-    recentRemoteUploads(provider: string, since: Date, limit = 1000): { remoteId: string; recordingId: string; submittedAt: string }[] {
+    recentRemoteUploads(provider: string, since: Date, limit = 1000): { remoteId: string; recordingId: string; submittedAt: string; verified: boolean }[] {
         return (this.database.prepare(`SELECT a.remote_id, a.recording_id,
-                MAX(CASE WHEN a.status = 'uncertain' THEN COALESCE(a.completed_at, a.started_at) ELSE a.started_at END) AS submitted_at
+                MAX(CASE WHEN a.status = 'uncertain' THEN COALESCE(a.completed_at, a.started_at) ELSE a.started_at END) AS submitted_at,
+                MAX(CASE WHEN a.status = 'accepted' THEN 1 ELSE 0 END) AS verified
             FROM upload_attempts a WHERE a.provider = ? AND a.status IN ('accepted', 'uncertain')
                 AND a.remote_id IS NOT NULL AND a.remote_id <> '' AND a.started_at >= ?
                 AND NOT EXISTS (SELECT 1 FROM provider_removals r WHERE r.provider = a.provider AND r.remote_id = a.remote_id)
-            GROUP BY a.remote_id ORDER BY submitted_at DESC LIMIT ?`).all(provider, since.toISOString(), limit) as { remote_id: string; recording_id: string; submitted_at: string }[])
-            .map(row => ({ remoteId: row.remote_id, recordingId: row.recording_id, submittedAt: row.submitted_at }));
+            GROUP BY a.remote_id ORDER BY submitted_at DESC LIMIT ?`).all(provider, since.toISOString(), limit) as { remote_id: string; recording_id: string; submitted_at: string; verified: number }[])
+            .map(row => ({ remoteId: row.remote_id, recordingId: row.recording_id, submittedAt: row.submitted_at, verified: row.verified === 1 }));
     }
 
     // Whether a submission of this recording to the destination may have created a video whose

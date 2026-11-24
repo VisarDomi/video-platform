@@ -80,3 +80,20 @@ test("an upload to the provider that removed the video is blocked before any net
     assert.match(db.get(r.id).blockReason, /^video-host removed video 91957324/);
 });
 
+test("reconciliation passes known active uploads with verified status to destination probes", async t => {
+    const { config, r } = await fixture(t);
+    const seen = [];
+    await reconcileDueUploads(config, day(1), {
+        withAuthenticatedPage: async run => run({}),
+        probeUploadStatus: async (_page, remoteId, context) => {
+            seen.push({ remoteId, context });
+            return { outcome: "not_ready", remoteUrl: null, reason: "still processing" };
+        },
+    });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].remoteId, "91957324");
+    assert.equal(seen[0].context.recordingId, r.id);
+    assert.deepEqual(seen[0].context.recentUploads.map(u => ({ remoteId: u.remoteId, verified: u.verified })),
+        [{ remoteId: "91957324", verified: false }]);
+});
+

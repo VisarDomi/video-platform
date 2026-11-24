@@ -16,6 +16,9 @@ export class InitWriteError extends Error {
 
 export class InitTracker {
     private currentMapUri: string | null = null;
+    private currentInitBytes: Buffer | null = null;
+    private currentFileName: string | null = null;
+    private pendingInit: { mapUri: string; data: Buffer } | null = null;
     private segmentCount: number = 0;
     private readonly disk: DiskSession;
     private resumeBoundary = false;
@@ -26,7 +29,7 @@ export class InitTracker {
     }
 
     public needsUpdate(mapUri: string): boolean {
-        return mapUri !== this.currentMapUri;
+        return mapUri !== this.currentMapUri && mapUri !== this.pendingInit?.mapUri;
     }
 
     public incrementSegmentCount(): void {
@@ -37,24 +40,45 @@ export class InitTracker {
         return this.segmentCount;
     }
 
-    public markResumeBoundary(nextLocalNumber: number): void {
+    public markResumeBoundary(nextLocalNumber: number, existingInitBytes: Buffer | null = null, existingFileName: string | null = null): void {
         this.resumeBoundary = true;
         this.resumeLocalNumber = nextLocalNumber;
         this.currentMapUri = null;
+        this.pendingInit = null;
+        this.currentInitBytes = existingInitBytes;
+        this.currentFileName = existingFileName;
     }
 
-    public async commitInit(
+    // Downloads a new map into memory without touching disk yet. Identical bytes
+    // under a new URL (e.g. CDN edge or token rotation) reuse the active init file.
+    public async stageInit(
         mapUri: string,
         downloadFn: () => Promise<import("../core/interfaces.js").SegmentFetchResult>,
-        nextLocalNumber: number,
-    ): Promise<InitCommitResult | null> {
+    ): Promise<"unchanged" | "staged" | null> {
         const result = await downloadFn();
         if (!result.data) return null;
         const buffer = result.data;
 
+        if (this.currentInitBytes && this.currentInitBytes.equals(buffer)) {
+            this.currentMapUri = mapUri;
+            this.pendingInit = null;
+            this.resumeBoundary = false;
+            return "unchanged";
+        }
+
+        this.pendingInit = { mapUri, data: buffer };
+        return "staged";
+    }
+
+    // Commits a staged init map to disk right before the first segment that uses it,
+    // so a failing segment never leaves an unreferenced init file behind.
+    public async flushPendingInit(nextLocalNumber: number): Promise<InitCommitResult | null> {
+        const pending = this.pendingInit;
+        if (!pending) return null;
+
         if (!await this.disk.materialize()) return null;
 
-        const isQualityChange = this.resumeBoundary || this.currentMapUri !== null;
+        const isQualityChange = this.resumeBoundary || this.currentMapUri !== null || this.currentInitBytes !== null;
         const baseNumber = this.resumeBoundary ? this.resumeLocalNumber : nextLocalNumber;
         let fileName = isQualityChange ? `init_${baseNumber}.mp4` : "init.mp4";
         let written: "written" | "exists" | "failed" = "exists";
@@ -63,7 +87,7 @@ export class InitTracker {
         for (let suffix = 0; suffix < 100 && written === "exists"; suffix++) {
             if (suffix > 0) fileName = `init_${baseNumber}_${suffix}.mp4`;
             const filePath = path.join(this.disk.dirPath, fileName);
-            written = await FileSystemManager.writeFileExclusive(filePath, buffer as unknown as Uint8Array);
+            written = await FileSystemManager.writeFileExclusive(filePath, pending.data as unknown as Uint8Array);
         }
         if (written === "failed") throw new InitWriteError(path.join(this.disk.dirPath, fileName));
         if (written === "exists") {
@@ -71,8 +95,24 @@ export class InitTracker {
             return null;
         }
 
-        this.currentMapUri = mapUri;
+        this.currentMapUri = pending.mapUri;
+        this.currentInitBytes = pending.data;
+        this.currentFileName = fileName;
+        this.pendingInit = null;
         this.resumeBoundary = false;
         return { fileName, isQualityChange };
+    }
+
+    public async commitInit(
+        mapUri: string,
+        downloadFn: () => Promise<import("../core/interfaces.js").SegmentFetchResult>,
+        nextLocalNumber: number,
+    ): Promise<InitCommitResult | null> {
+        const staged = await this.stageInit(mapUri, downloadFn);
+        if (staged === null) return null;
+        if (staged === "unchanged") {
+            return { fileName: this.currentFileName ?? "init.mp4", isQualityChange: false };
+        }
+        return await this.flushPendingInit(nextLocalNumber);
     }
 }

@@ -7,7 +7,8 @@ import { createProviderUploader } from "../upload/providerFactory.js";
 import { writeComparisonReport } from "./comparisonTrial.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
-import { swappedWords, type Destination, type DestinationSession, type UploadLookup, type UploadProbe } from "sdk";
+import { RECENT_UPLOADS_MILLISECONDS } from "../upload/uploadCoordinator.js";
+import { swappedWords, type Destination, type DestinationSession, type UploadLookup, type UploadLookupContext, type UploadProbe } from "sdk";
 
 
 async function retrySourceUnchanged(database: PipelineDatabase, id: string): Promise<boolean> {
@@ -28,8 +29,8 @@ async function retrySourceUnchanged(database: PipelineDatabase, id: string): Pro
 // on one signed-in page. Production passes none and uses the destination's sessions.
 export interface PageLevelBrowser {
     withAuthenticatedPage<T>(action: (page: any) => Promise<T>): Promise<T>;
-    probeUploadStatus(page: any, remoteId: string): Promise<UploadProbe>;
-    lookupUpload?(page: any, identity: string, exactRemoteId?: string): Promise<UploadLookup>;
+    probeUploadStatus(page: any, remoteId: string, context?: UploadLookupContext): Promise<UploadProbe>;
+    lookupUpload?(page: any, identity: string, exactRemoteId?: string, context?: UploadLookupContext): Promise<UploadLookup>;
 }
 
 type ReconcileSession = Pick<DestinationSession, "probe"> & Partial<Pick<DestinationSession, "lookup">>;
@@ -37,8 +38,8 @@ type ReconcileSession = Pick<DestinationSession, "probe"> & Partial<Pick<Destina
 function pageLevelSessions(browser: PageLevelBrowser): { withSession<T>(action: (session: ReconcileSession) => Promise<T>): Promise<T> } {
     return {
         withSession: (action) => browser.withAuthenticatedPage((page) => action({
-            probe: (remoteId) => browser.probeUploadStatus(page, remoteId),
-            ...(browser.lookupUpload ? { lookup: (identity: string, exactRemoteId?: string) => browser.lookupUpload!(page, identity, exactRemoteId) } : {}),
+            probe: (remoteId, context) => browser.probeUploadStatus(page, remoteId, context),
+            ...(browser.lookupUpload ? { lookup: (identity: string, exactRemoteId?: string, context?: UploadLookupContext) => browser.lookupUpload!(page, identity, exactRemoteId, context) } : {}),
         })),
     };
 }
@@ -75,8 +76,9 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         await destination.withSession(async (session) => {
             for (const confirmation of providerDue) {
                 try {
+                const knownUploads = () => database.recentRemoteUploads(provider, new Date(now.getTime() - RECENT_UPLOADS_MILLISECONDS));
                 let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
-                let probe = remoteId ? await session.probe(remoteId) : null;
+                let probe = remoteId ? await session.probe(remoteId, { recentUploads: knownUploads(), recordingId: confirmation.recordingId }) : null;
                 // A copy the destination proved removed (gone from its complete list) is
                 // recorded at once and never uploaded there again. Only a copy that failed or
                 // never became playable waits for the seven-day gate and is then uploaded again.
@@ -114,7 +116,10 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     const identity = recording && metadata ? uploadLookupIdentity(recording,
                         database.getArtifactPart(recording.id) ?? "full", metadata.title) : null;
                     if (identity && session.lookup) {
-                        const lookup = await session.lookup(identity);
+                        const lookup = await session.lookup(identity, undefined, {
+                            recentUploads: database.hasUncapturedSubmission(confirmation.recordingId, provider) ? [] : knownUploads(),
+                            recordingId: confirmation.recordingId,
+                        });
                         if (lookup.kind === "found") {
                             remoteId = lookup.remoteId;
                             database.attachUncertainRemote(confirmation.attemptId, remoteId);
@@ -139,7 +144,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     });
                     continue;
                 }
-                probe ??= await session.probe(remoteId);
+                probe ??= await session.probe(remoteId, { recentUploads: knownUploads(), recordingId: confirmation.recordingId });
                 if (probe.outcome === "missing") {
                     await removed(remoteId, probe.reason, probe.removed === true);
                     continue;

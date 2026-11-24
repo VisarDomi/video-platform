@@ -59,6 +59,47 @@ test('a quick stream-token answer sends no second request', async () => {
     assert.equal(calls, 1);
 });
 
+test('a second stream-token hedge fires at three seconds when both earlier requests hang', { timeout: 6000 }, async () => {
+    let calls = 0;
+    const provider = {
+        fetchShortTokens: () => ++calls <= 2 ? new Promise(() => {}) : Promise.resolve({ extras: { tt: 't3', ttu: 'u3', tte: '9999999999' } }),
+    };
+    const service = new AuthService({ email: 'test@example.invalid', password: 'fixture', provider: 'live-a' }, provider);
+    service.authContext.updateFromLogin({ refreshToken: 'refresh', sessionToken: 'access', extras: {} });
+    const started = Date.now();
+    await service.setTokenData(true);
+    assert.equal(calls, 3);
+    assert.ok(Date.now() - started >= 2800 && Date.now() - started < 5000);
+    assert.equal(service.authContext.getTokenBag().extras.tt, 't3');
+});
+
+test('a slow short-token refresh logs fetch and save timings as a warning', async () => {
+    const { log, lines } = recorder();
+    let calls = 0;
+    const provider = demo({
+        intervals: { shortTokenRefresh: 100, sessionRefresh: 1800000 },
+        fetchShortTokens: async () => {
+            if (++calls === 1) {
+                await new Promise(resolve => setTimeout(resolve, 80));
+                return { extras: { short: '9999999999' } };
+            }
+            throw new Error('stop-loop');
+        },
+    });
+    const service = new AuthService(account, provider, { label: 'Demo', log });
+    service.authContext.updateFromLogin({ refreshToken: 'refresh', sessionToken: 'access', extras: {} });
+    service.authContext.saveTokenToFile = async () => { await new Promise(resolve => setTimeout(resolve, 20)); };
+    // Run one slow cycle then exit when the second call throws and hits the warning/catch.
+    const loop = service.refreshShortLivedTokens();
+    await new Promise(resolve => setTimeout(resolve, 160));
+    const slow = lines.find(([level, msg]) => level === 'warn' && /Slow short-refresh/.test(msg));
+    assert.ok(slow, `expected slow short-refresh warning, got: ${JSON.stringify(lines)}`);
+    assert.match(slow[1], /total=\d+ms \(fetch=\d+ms, save=\d+ms\)/);
+    // Prevent unhandled loop from keeping the process alive.
+    provider.fetchShortTokens = () => new Promise(() => {});
+    void loop;
+});
+
 // ---- the site's decisions and token description (generic sites) ----
 
 class Rejected extends Error {}

@@ -63,6 +63,7 @@ function initFileOrder(name: string): [number, number] | null {
 export interface SegmentInfo {
     remoteUrl: string;
     localName: string;
+    localNumber?: number;
     providerSequence: number;
     metadata: string[];
     accurateDuration?: number;
@@ -175,6 +176,22 @@ export class PlaylistManager {
 
     public get nextSegmentNumber(): number {
         return this.nextLocalNumber;
+    }
+
+    // The last initialization map referenced by the existing playlist, so a resume
+    // receiving byte-identical init bytes reuses it instead of writing a duplicate file.
+    public async activeInitMap(): Promise<{ fileName: string; bytes: Buffer } | null> {
+        if (!this.disk.materialized) return null;
+        const content = await FileSystemManager.readFile(this.fullPlaylistPath);
+        if (!content) return null;
+        const fileName = [...content.matchAll(/^#EXT-X-MAP:.*\bURI="([^"]+)"/gm)].at(-1)?.[1] ?? null;
+        if (!fileName) return null;
+        try {
+            const bytes = await fs.readFile(path.join(this.disk.dirPath, fileName));
+            return bytes.length > 0 ? { fileName, bytes } : null;
+        } catch {
+            return null;
+        }
     }
 
     public async initializeFromExistingPlaylist(inspectSegment?: SegmentInspector): Promise<void> {
@@ -495,9 +512,11 @@ export class PlaylistManager {
                     && !segmentMetadata.includes("#EXT-X-DISCONTINUITY")) {
                     segmentMetadata.unshift("#EXT-X-DISCONTINUITY");
                 }
+                const localNumber = this.nextLocalNumber++;
                 newSegments.push({
                     remoteUrl: remoteTsUrl,
-                    localName: formatSegmentName(this.nextLocalNumber++, this.recordingId, providerSequence),
+                    localName: formatSegmentName(localNumber, this.recordingId, providerSequence),
+                    localNumber,
                     providerSequence,
                     metadata: segmentMetadata,
                     programDateTime: currentPDT ?? undefined,
