@@ -233,10 +233,6 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
                     return true;
                 });
                 if (changed.length > 0) console.log(JSON.stringify({ event: "campaign-reconcile", result: { ...reconciled, results: changed } }));
-                for (const item of reconciled.results ?? []) {
-                    if (item.disposition === "provider_removed") notifyDesktop("Provider removed an upload",
-                        `${item.recordingId} (video ${item.remoteId}) is gone; blocked for your review`, true);
-                }
             }
             const result = await campaignStep(config) as {
                 step?: { disposition?: string; resumeAt?: string };

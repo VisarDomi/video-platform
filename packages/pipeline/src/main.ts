@@ -335,15 +335,24 @@ async function main(): Promise<void> {
             return;
         }
         if (command === "review") {
-            const blocked = database.list().filter((recording) => recording.state === "blocked")
-                .map((recording) => ({
+            const blocked: Array<Record<string, unknown>> = [];
+            const providerRemoved: Array<Record<string, unknown>> = [];
+            for (const recording of database.list().filter((item) => item.state === "blocked")) {
+                const removals = database.providerRemovals(recording.id);
+                const isProviderRemoval = Boolean(
+                    recording.blockReason && removals.some((entry) => recording.blockReason!.startsWith(`${entry.provider} removed video ${entry.remoteId} `)),
+                );
+                const item = {
                     recordingId: recording.id,
                     provider: recording.provider,
                     state: recording.state,
                     reason: recording.blockReason,
                     sourcePath: recording.sourcePath,
                     resolutionArtifacts: database.listResolutionReviewArtifacts(recording.id),
-                }));
+                };
+                if (isProviderRemoval) providerRemoved.push(item);
+                else blocked.push(item);
+            }
             const provenance = database.listProvenanceReview().map((item) => {
                 const recording = database.get(item.recordingId);
                 return {
@@ -363,7 +372,7 @@ async function main(): Promise<void> {
                 sourceDimensions: piece.sourceDimensions,
                 sourcePath: database.get(piece.recordingId)?.sourcePath ?? null,
             }));
-            console.log(JSON.stringify({ blocked, provenanceReview: provenance, manualPieces }, null, 2));
+            console.log(JSON.stringify({ blocked, providerRemoved, provenanceReview: provenance, manualPieces }, null, 2));
             return;
         }
         if (command === "upload-provider") {

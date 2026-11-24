@@ -169,6 +169,9 @@ function queueStatusFor(row, isCurrent, isWorking) {
 }
 
 function eventMetaFor(entry) {
+  if (entry.to_state === 'blocked' && /removed video \S+ after /i.test(entry.reason || '')) {
+    return { label: 'Removed by provider', tone: 'wait', group: 'uploads' };
+  }
   if (entry.to_state && EVENT_STATE_META[entry.to_state]) return EVENT_STATE_META[entry.to_state];
   const fallbackStage = entry.stage || 'process';
   const tone = fallbackStage === 'verified' ? 'verified' : fallbackStage === 'upload' ? 'upload' : fallbackStage === 'verify' ? 'verify' : fallbackStage === 'attention' ? 'issue' : 'process';
@@ -523,7 +526,7 @@ function renderServices() {
     );
     list.append(row);
   }
-  text('retained-summary', `${formatCount(data.health.historical_removals)} historical provider removals · acknowledged`);
+  text('retained-summary', `${formatCount(data.health.historical_removals)} provider removals · excluded from re-upload`);
   text('monitoring-note', `Babysitting: ${data.monitoring.cadence || 'scheduled'}. Last check ${data.monitoring.last_check ? time(data.monitoring.last_check, true) : 'not yet recorded'}. Service RAM excludes file cache.`);
 }
 

@@ -64,18 +64,16 @@ online verification.
 
 Use `python3 scripts/babysit_health.py` from the repository root for a human
 queue summary, or add `--json` for monitoring. It separates current failed work,
-actionable blocks, newly observed provider losses, normal short waiting and
-acknowledged historical provider removals. Service/journal/storage checks still
-run separately; a raw workflow-state count is not a severity assessment.
+actionable blocks, normal short waiting and recorded provider removals.
+Service/journal/storage checks still run separately; a raw workflow-state count
+is not a severity assessment.
 
-After investigating/reporting existing provider losses, or when the owner
-explicitly accepts them, `--acknowledge-current-removals --apply` records exact
-removal/reason acknowledgements in `babysit/monitoring.json`. This does not write
-SQLite, delete receipts, unblock/requeue footage, grant backup/cleanup coverage,
-or clear any provider-removal ban. New remote IDs and changed failure reasons
-remain actionable. Historical raw `blocked` rows remain the safety mechanism,
-while acknowledged external losses stop appearing as current pipeline faults.
-A failed transfer attempt is not a current failure once its recording has resumed.
+Provider removals recorded in SQLite (`provider_removals`) automatically exclude
+those recordings from re-upload to that provider (including inside short batches)
+and from local cleanup. They require no manual acknowledgement in
+`monitoring.json` and do not raise attention alerts; unrelated blocks or changed
+failure reasons on the same recording remain actionable. A failed transfer
+attempt is not a current failure once its recording has resumed.
 
 Tests use temporary databases and monitor files:
 `python3 -m unittest discover -s scripts -p 'test_babysit*.py'`.

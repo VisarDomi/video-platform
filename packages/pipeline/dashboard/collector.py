@@ -420,8 +420,6 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         state = "worker_unresponsive"
     alerts = [{"recording": r["id"], "source_path": by_id.get(r["id"], {}).get("source_path"),
                "message": safe_reason(r["block_reason"]), "kind": r["state"]} for r in health["actionable_items"]]
-    alerts.extend({"recording": r["recording_id"], "source_path": by_id.get(r["recording_id"], {}).get("source_path"),
-                   "message": "A new provider copy is missing", "kind": "provider_loss"} for r in health["unacknowledged_provider_removals"])
     if state == "worker_stopped":
         alerts.insert(0, {"message": "The upload worker is stopped", "kind": "service"})
     elif late_heartbeat:

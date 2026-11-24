@@ -148,14 +148,14 @@ class DashboardDataTests(unittest.TestCase):
         day=next(row for row in self.read()['history'] if row['date']=='2026-10-25')
         self.assertEqual(day['submitted'],2)
 
-    def test_acknowledged_provider_history_is_not_an_attention_banner(self):
+    def test_recorded_provider_removal_is_not_an_attention_banner(self):
         self.db.execute("INSERT INTO recordings VALUES ('old-loss','live-a','/unused','edited',60,'blocked','video-host removed video 99 after upload',NULL,'2026-10-01T00:00:00Z')")
         self.db.execute("INSERT INTO provider_removals VALUES ('old-loss','video-host','99','provider removed its copy','2026-10-01T00:00:00Z')")
         self.db.commit()
-        acknowledge_current_removals(self.path,self.root/'babysit/monitoring.json')
         data=self.read()
         self.assertEqual(data['health']['historical_removals'],1)
         self.assertEqual(data['health']['attention'],0)
+        self.assertEqual(data['health']['alerts'],[])
 
     def test_manual_pause_is_normal_and_does_not_affect_capture(self):
         (self.root/"pipeline/user-pause.json").write_text('{}')
