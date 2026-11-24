@@ -252,3 +252,56 @@ test('a list or login page from a shared cache proves nothing: no "absent", no r
     await control('logout', { account: 'coach', revokeRemember: true });
     await assert.rejects(host.withSession(async () => {}), (error) => /shared cache/.test(error.message) && !(error instanceof HumanActionRequiredError));
 });
+
+test('a companion uploads on exactly the shared session, never signs in, and reports a replaced session', async (t) => {
+    const { clock, artifact, stateDir, make, events } = await start(t);
+    // The PC signs in once (its own destination); the companion gets its session only.
+    const pc = make();
+    assert.equal((await pc.upload(request(artifact, '2026-06-01 120000 warm-up'))).kind, 'uploaded');
+    assert.equal(events('login').length, 1);
+    const shared = await destination.readSharedSession({}, stateDir);
+    assert.deepEqual(shared.cookies.map((cookie) => cookie.name).sort(), ['consent', 'sid'], 'never the remember-me token');
+    assert.equal(await destination.readSharedSession({}), null, 'the session lives in the state folder');
+
+    // An hour later the host replaces the session ID on the next request.
+    clock.advance(3_601_000);
+    const companionDir = mkdtempSync(path.join(os.tmpdir(), 'form-host-companion-'));
+    t.after(() => rmSync(companionDir, { recursive: true, force: true }));
+    const stop = new AbortController();
+    t.after(() => stop.abort());
+    const replaced = [];
+    const companion = destination.createCompanionDestination({
+        config: { baseUrl: make().config.baseUrl, retryDelayMs: 0 }, stateDir: companionDir,
+        browser: { executablePath: '/unused', profilePath: '/unused', headless: true },
+        credentials: () => { throw new Error('never'); }, stopSignal: stop.signal,
+    }, shared, async (session) => { replaced.push(session); });
+    const job = request(artifact, '2026-06-01 130000 court-two');
+    const outcome = await companion.upload(job);
+    assert.equal(outcome.kind, 'uploaded');
+    assert.match(outcome.receipt.submittedVideoId, /^\d+$/);
+    assert.equal(events('login').length, 1, 'no login of its own');
+    assert.equal(replaced.length, 1, 'the replaced session is reported');
+    assert.notEqual(replaced[0].fingerprint, shared.fingerprint);
+
+    // The PC stores it, and its own destination goes on with it.
+    await destination.adoptSharedSession({}, replaced[0], stateDir);
+    assert.equal((await destination.readSharedSession({}, stateDir)).fingerprint, replaced[0].fingerprint);
+    assert.equal((await pc.session.check()).loggedIn, true);
+    assert.equal(events('login').length, 1);
+});
+
+test('a companion on a session the host ended stops as session-lost and never signs in', async (t) => {
+    const { artifact, stateDir, make, control, events } = await start(t);
+    await make().upload(request(artifact, '2026-06-01 120000 warm-up'));
+    const shared = await destination.readSharedSession({}, stateDir);
+    await control('logout', { account: 'coach', revokeRemember: true });
+    const companionDir = mkdtempSync(path.join(os.tmpdir(), 'form-host-companion-'));
+    t.after(() => rmSync(companionDir, { recursive: true, force: true }));
+    const companion = destination.createCompanionDestination({
+        config: { baseUrl: make().config.baseUrl, retryDelayMs: 0 }, stateDir: companionDir,
+        browser: { executablePath: '/unused', profilePath: '/unused', headless: true },
+        credentials: () => { throw new Error('never'); }, stopSignal: new AbortController().signal,
+    }, shared, async () => {});
+    await assert.rejects(companion.upload(request(artifact, '2026-06-01 130000 court-two')), ProviderSessionLostError);
+    assert.equal(events('login').length, 1);
+});

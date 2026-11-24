@@ -8,6 +8,7 @@ import { readFinalizationContract } from "./discovery/finalizationContract.js";
 import { ensureFinalizedRemuxOne } from "./commands/ensureFinalizedRemuxOne.js";
 import { describeOne } from "./commands/describeOne.js";
 import { uploadOne } from "./commands/uploadOne.js";
+import { probeUplink } from "./uplink/uplinkCommands.js";
 import { reconcileDueUploads } from "./commands/reconcileUploads.js";
 import { TargetCatalogResolver } from "./provenance/targetResolver.js";
 import { PipelineOrchestrator } from "./scheduler/orchestrator.js";
@@ -39,7 +40,8 @@ function usage(): never {
         "  process-one --apply | provenance-refresh --apply | provenance-review",
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
         "  review | retry ID | upload-plan",
-        "  upload-one --recording ID --apply | reconcile-uploads --apply",
+        "  upload-one --recording ID [--uplink ID [--carrier-dir DIR]] --apply | reconcile-uploads --apply",
+        "  uplink-probe [--carrier-dir DIR]",
         "  upload-provider [--provider DESTINATION --apply]",
         "  metadata-check [--provider DESTINATION]",
         "  plus each destination's own commands (its sites-file entry's \"commands\" package)",
@@ -107,7 +109,7 @@ async function main(): Promise<void> {
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "metadata-check"].includes(command ?? "")) {
+        "upload-provider", "metadata-check", "uplink-probe"].includes(command ?? "")) {
         // Not a core command: a destination's own (named by its sites-file entry), or none.
         const run = await destinationCommand(command ?? "");
         if (!run) {
@@ -185,7 +187,14 @@ async function main(): Promise<void> {
         requireApply(args);
         const recordingId = option(args, "--recording");
         if (!recordingId) usage();
-        console.log(JSON.stringify(await uploadOne(recordingId, pipelineConfig), null, 2));
+        const uplink = option(args, "--uplink") ?? undefined;
+        const carrierRoot = option(args, "--carrier-dir") ?? undefined;
+        if (carrierRoot && !uplink) throw new Error("--carrier-dir needs --uplink");
+        console.log(JSON.stringify(await uploadOne(recordingId, pipelineConfig, { uplink, carrierRoot }), null, 2));
+        return;
+    }
+    if (command === "uplink-probe") {
+        console.log(JSON.stringify(await probeUplink(pipelineConfig, option(process.argv.slice(3), "--carrier-dir") ?? undefined), null, 2));
         return;
     }
     if (command === "reconcile-uploads") {

@@ -435,7 +435,7 @@ profile directory at a time.
 Before any bytes are sent, an upload checks: the recording has no verified or
 pending remote copy in the ledger, passed `resolution-policy-v6`, fits the
 provider's duration/size limits, contains no learned rejected phrase, has no
-copy in a synchronized provider inventory, fits the monthly budget, and (for a
+copy in a synchronized provider inventory, fits the uplink's allowance, and (for a
 retry) is not found by an exact lookup. A submitted upload is never accepted on
 submit alone: durable complete-file/metadata acceptance and a captured ID release
 only the matching conversion; playback is checked daily; seven days is only the re-upload gate. Recovery rules are in `docs/upload-recovery.md`.
@@ -573,4 +573,31 @@ VIDEO_PIPELINE_NETWORK_UPLOADS=1 DISPLAY=:111 npm run upload-one -w pipeline -- 
   --recording RECORDING_ID --apply
 
 VIDEO_PIPELINE_NETWORK_UPLOADS=1 DISPLAY=:111 npm run reconcile-uploads -w pipeline
+```
+
+## A second uplink
+
+The sites file's optional `uplink` section (`packages/sdk/src/uplink.ts`) adds a network
+uploads leave from besides the PC's own (`home`). Its runner (`dist/uplinkRunner.js`,
+started by the section's `runner` command, usually over ssh) performs one upload at a
+time on that network's machine, from the carrier drive's copy of the artifact, when the
+PC tells it to; it speaks JSON lines on stdin/stdout (`src/uplink/protocol.ts`). The PC
+keeps the ledger: it reserves the bytes on the uplink, records the attempt, records each
+progress and evidence report durably before the runner may go on, and settles the attempt
+with its usual code. The runner checks its network (the default gateway's hardware
+address, or the section's `network.probe`), the carrier's `carrier.json` and the file's
+size and SHA-256 before anything leaves, checks the network again during the transfer and
+right before the step that creates the remote copy, and stops when the PC stops pinging
+or closes the connection. It uploads on the PC's shared session (the destination's
+`readSharedSession` and `createCompanionDestination`), never signs in, and hands back a
+session the site replaced (`adoptSharedSession`). The PC refuses a runner whose protocol
+or commit differs from the one recorded in `uplink-runner.json` beside the ledger (the
+deployment's runner deploy writes it).
+
+```bash
+# Where the runner is: its network, the carrier and its files, its browser, its commit.
+node packages/pipeline/dist/main.js uplink-probe [--carrier-dir DIR]
+# One upload from the uplink (the worker stopped); --carrier-dir names another carrier folder.
+VIDEO_PIPELINE_NETWORK_UPLOADS=1 node packages/pipeline/dist/main.js upload-one \
+  --recording RECORDING_ID --uplink office [--carrier-dir DIR] --apply
 ```

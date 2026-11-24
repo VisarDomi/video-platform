@@ -151,3 +151,28 @@ test("uplink: optional; one labelled drive or a directory, a gateway or a probe,
     ]) assert.throws(() => parse(bad), message, JSON.stringify(bad));
     assert.throws(() => parse({ ...base, dailyBytes: -1 }), /^Error: sites.json: uplink: dailyBytes/);
 });
+
+test("upload errors survive a process boundary as the same class", async () => {
+    const sdk = await import("../dist/index.js");
+    const roundTrip = (error) => sdk.uploadErrorFromWire(JSON.parse(JSON.stringify(sdk.uploadErrorToWire(error))));
+    const rejected = roundTrip(new sdk.MetadataRejectedError(["word", "other"]));
+    assert.ok(rejected instanceof sdk.MetadataRejectedError);
+    assert.deepEqual(rejected.phrases, ["word", "other"]);
+    const lost = roundTrip(new sdk.ProviderSessionLostError("signed out"));
+    assert.ok(lost instanceof sdk.ProviderSessionLostError && lost instanceof sdk.TransferAbortedBeforeSubmissionError);
+    assert.equal(lost.message, "signed out");
+    const aborted = roundTrip(new sdk.TransferAbortedBeforeSubmissionError("stopped"));
+    assert.ok(aborted instanceof sdk.TransferAbortedBeforeSubmissionError && !(aborted instanceof sdk.ProviderSessionLostError));
+    const human = roundTrip(new sdk.HumanActionRequiredError("daily_limit", "limit"));
+    assert.ok(human instanceof sdk.HumanActionRequiredError);
+    assert.equal(human.action, "daily_limit");
+    const transport = roundTrip(new sdk.UploadTransportError("reset", 123, true));
+    assert.ok(transport instanceof sdk.UploadTransportError);
+    assert.deepEqual([transport.transmittedBytes, transport.acceptanceUnknown, transport.message], [123, true, "reset"]);
+    assert.ok(roundTrip(new sdk.RecoveryDeferredError("later")) instanceof sdk.RecoveryDeferredError);
+    const plain = roundTrip(new TypeError("odd"));
+    assert.equal(plain.constructor, Error);
+    assert.equal(plain.message, "odd");
+    assert.equal(sdk.uploadErrorFromWire({ name: "HumanActionRequiredError", message: "x", action: "nonsense" }).constructor, Error);
+    assert.equal(sdk.uploadErrorFromWire(null).message, "an upload failed on a companion machine");
+});

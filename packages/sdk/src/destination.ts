@@ -187,8 +187,21 @@ export interface DestinationPlugin {
     policy: DestinationPolicy;
     createDestination(host: DestinationHost): Destination;
     // Read-only snapshot of a destination's shared login cookies for a companion device.
-    // Never logs in, never sends credentials or persistent login tokens.
-    readSharedSession?(config: Readonly<Record<string, unknown>>): Promise<SharedSessionSnapshot | null>;
+    // Never logs in, never sends credentials or persistent login tokens. stateDir is the
+    // destination's state folder when the caller has it (DestinationHost.stateDir).
+    readSharedSession?(config: Readonly<Record<string, unknown>>, stateDir?: string): Promise<SharedSessionSnapshot | null>;
+    // A destination for a companion machine (the runner on a second uplink) that uploads on
+    // exactly this signed-in session: it never signs in (host.credentials throws), keeps
+    // nothing beyond host.stateDir, and calls onSessionChange before its upload settles
+    // when the site replaced the session, so the ledger's machine can store it.
+    createCompanionDestination?(
+        host: DestinationHost,
+        session: SharedSessionSnapshot,
+        onSessionChange: (session: SharedSessionSnapshot) => Promise<void>,
+    ): Destination;
+    // Stores a session the site replaced during a companion's upload, as the plug-in's own
+    // session checks store a replaced one (readSharedSession returns it afterwards).
+    adoptSharedSession?(config: Readonly<Record<string, unknown>>, session: SharedSessionSnapshot, stateDir?: string): Promise<void>;
 }
 
 // The destinations a deployment uploads to, from its sites file. They are read only by
@@ -311,6 +324,52 @@ export class UploadTransportError extends Error {
 // Session recovery could not run now (another recovery holds the lock, the phone is
 // unreachable); it is retried later, never escalated to a password login.
 export class RecoveryDeferredError extends Error {}
+
+// ---- Errors across a process boundary -------------------------------------------------
+//
+// An upload on a companion machine fails there; the core decides what the failure means
+// by its class. These turn an error into plain JSON and back into the same class, so the
+// core's handling is the same wherever the upload ran. Anything else becomes a plain Error
+// with its message.
+export type UploadErrorWire =
+    | { readonly name: "MetadataRejectedError"; readonly message: string; readonly phrases: readonly string[] }
+    | { readonly name: "ProviderSessionLostError" | "TransferAbortedBeforeSubmissionError" | "RecoveryDeferredError" | "Error"; readonly message: string }
+    | { readonly name: "HumanActionRequiredError"; readonly message: string; readonly action: HumanActionRequiredError["action"] }
+    | { readonly name: "UploadTransportError"; readonly message: string; readonly transmittedBytes: number; readonly acceptanceUnknown: boolean };
+
+export function uploadErrorToWire(error: unknown): UploadErrorWire {
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof MetadataRejectedError) return { name: "MetadataRejectedError", message, phrases: [...error.phrases] };
+    if (error instanceof ProviderSessionLostError) return { name: "ProviderSessionLostError", message };
+    if (error instanceof TransferAbortedBeforeSubmissionError) return { name: "TransferAbortedBeforeSubmissionError", message };
+    if (error instanceof HumanActionRequiredError) return { name: "HumanActionRequiredError", message, action: error.action };
+    if (error instanceof UploadTransportError) {
+        return { name: "UploadTransportError", message, transmittedBytes: error.transmittedBytes, acceptanceUnknown: error.acceptanceUnknown };
+    }
+    if (error instanceof RecoveryDeferredError) return { name: "RecoveryDeferredError", message };
+    return { name: "Error", message };
+}
+
+export function uploadErrorFromWire(wire: UploadErrorWire): Error {
+    const message = typeof wire?.message === "string" ? wire.message : "an upload failed on a companion machine";
+    switch (wire?.name) {
+        case "MetadataRejectedError": {
+            const phrases = Array.isArray(wire.phrases) ? wire.phrases.filter((phrase): phrase is string => typeof phrase === "string") : [];
+            return new MetadataRejectedError(phrases);
+        }
+        case "ProviderSessionLostError": return new ProviderSessionLostError(message);
+        case "TransferAbortedBeforeSubmissionError": return new TransferAbortedBeforeSubmissionError(message);
+        case "HumanActionRequiredError":
+            return ["captcha", "session_login", "daily_limit"].includes(wire.action)
+                ? new HumanActionRequiredError(wire.action, message) : new Error(message);
+        case "UploadTransportError":
+            return new UploadTransportError(message,
+                Number.isSafeInteger(wire.transmittedBytes) && wire.transmittedBytes >= 0 ? wire.transmittedBytes : 0,
+                wire.acceptanceUnknown !== false);
+        case "RecoveryDeferredError": return new RecoveryDeferredError(message);
+        default: return new Error(message);
+    }
+}
 
 // ---- Rules shared by the core and destinations ----------------------------------------
 

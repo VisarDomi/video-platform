@@ -6,7 +6,8 @@ import { probeDuration } from "descriptor";
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
-import { createProviderUploader } from "../upload/providerFactory.js";
+import { createProviderUploader, createUplinkUploader } from "../upload/providerFactory.js";
+import path from "node:path";
 import { UploadCoordinator } from "../upload/uploadCoordinator.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
 import { RESOLUTION_POLICY_VERSION } from "../stages/resolutionPolicy.js";
@@ -16,17 +17,29 @@ import { isDirectArtifactPath } from "../stages/remux.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
 import { settleRejectedPhrases } from "../metadata/rejectedPhraseCheck.js";
 import { cancelInvalidShortBatch, poolRecordingPart } from "../campaign/shorts.js";
-import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../domain/uploadBudget.js";
+import { HOME_UPLINK, REQUEST_OVERHEAD_RESERVATION_BYTES } from "../domain/uploadBudget.js";
 
 export { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../domain/uploadBudget.js";
+
+export interface UploadOneOptions {
+    // The uplink the bytes leave from (default home). Another uplink's upload is performed by
+    // its runner from the carrier's copy of the artifact.
+    readonly uplink?: string;
+    // Where the runner finds the carrier, instead of the setting's remoteMount (tests).
+    readonly carrierRoot?: string;
+}
 
 export async function uploadOne(
     recordingId: string,
     config: PipelineConfig,
+    options: UploadOneOptions = {},
 ): Promise<unknown> {
     if (!config.networkUploadsEnabled) {
         throw new Error("Network uploads are disabled; explicit VIDEO_PIPELINE_NETWORK_UPLOADS=1 opt-in is required");
     }
+    const uplink = options.uplink ?? HOME_UPLINK;
+    const setting = uplink === HOME_UPLINK ? null : config.uplink ?? null;
+    if (uplink !== HOME_UPLINK && setting?.id !== uplink) throw new Error(`The sites file names no uplink "${uplink}"`);
     const database = new PipelineDatabase(config.databasePath);
     try {
         const provider = config.uploadProvider ?? database.getActiveUploadProvider();
@@ -126,15 +139,18 @@ export async function uploadOne(
             database.transition(recordingId, "metadata_ready", "blocked", reason);
             return { recordingId, uploadProvider: provider, state: "blocked", disposition: "manual_review", reason };
         }
-        const uploader = await createProviderUploader(config, provider);
+        const uploader = setting
+            ? await createUplinkUploader(config, provider, setting, { name: path.basename(artifact.path), sha256: artifact.sha256 }, options.carrierRoot)
+            : await createProviderUploader(config, provider);
         const reservedBytes = artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES;
         const reservationId = database.reserveUpload(
             recordingId,
             reservedBytes,
             new Date(),
             config.uploadTimeZone,
-            database.getCampaignControl().dailyUploadLimitBytes,
+            setting ? setting.dailyBytes : database.getCampaignControl().dailyUploadLimitBytes,
             provider,
+            uplink,
         );
         const outcome = await new UploadCoordinator(database, uploader).uploadAdmitted(
             recordingId,
@@ -168,6 +184,7 @@ export async function uploadOne(
         return {
             recordingId,
             uploadProvider: provider,
+            uplink,
             state: database.get(recordingId)?.state,
             transmittedBytes: receipt.transmittedBytes,
             conversionCleanup,

@@ -3,7 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import type { PipelineConfig } from "../config.js";
 import { readProviderCredentials, assertUploadProvider, type ActiveUploadProvider } from "../config/uploadProviders.js";
-import { loadDestinationPlugin, parseDestinations, type Destination } from "sdk";
+import { loadDestinationPlugin, parseDestinations, type Destination, type DestinationEntry, type DestinationPlugin, type UplinkSetting } from "sdk";
+import { RemoteDestination } from "./remoteDestination.js";
+import { deployedRunnerCommit } from "../uplink/runnerConnection.js";
 import { sitesFilePath } from "shared";
 import { readFile } from "node:fs/promises";
 import { shutdownSignal } from "../shutdown.js";
@@ -12,6 +14,13 @@ import { shutdownSignal } from "../shutdown.js";
 // pipeline-owned browser profile (everyday and shared profiles are refused here, before
 // the plug-in sees a path) with the provider's credentials.
 export async function createProviderUploader(config: PipelineConfig, provider: ActiveUploadProvider): Promise<Destination> {
+    return (await openDestination(config, provider)).destination;
+}
+
+// The destination, its plug-in and its sites-file entry.
+export async function openDestination(config: PipelineConfig, provider: ActiveUploadProvider): Promise<{
+    destination: Destination; plugin: DestinationPlugin; entry: DestinationEntry; stateDir: string;
+}> {
     assertUploadProvider(provider);
     const profilePath = path.resolve(config.browserProfilePath);
     let ancestor = profilePath;
@@ -41,13 +50,33 @@ export async function createProviderUploader(config: PipelineConfig, provider: A
     const stateDir = path.join(path.dirname(config.databasePath), "destinations", provider);
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     await chmod(stateDir, 0o700);
-    return plugin.createDestination({
+    const destination = plugin.createDestination({
         config: entry.config ?? {},
         stateDir,
         browser: { executablePath: config.chromiumExecutablePath, profilePath },
         credentials: () => readProviderCredentials(config.credentialsFilePath, provider),
         stopSignal: shutdownSignal,
     });
+    return { destination, plugin, entry, stateDir };
+}
+
+// The destination for an upload that leaves from the setting's uplink: the runner on that
+// network's machine sends the carrier's copy of the file (see remoteDestination.ts).
+export async function createUplinkUploader(config: PipelineConfig, provider: ActiveUploadProvider, uplink: UplinkSetting,
+    file: { name: string; sha256: string }, carrierRoot?: string): Promise<Destination> {
+    const { destination, plugin, entry, stateDir } = await openDestination(config, provider);
+    return new RemoteDestination(destination, plugin, entry, stateDir, {
+        uplink,
+        carrier: { root: carrierRoot ?? uplink.carrier.remoteMount, id: carrierId(uplink) },
+        file,
+        expectedCommit: await deployedRunnerCommit(config.databasePath),
+        stopSignal: shutdownSignal,
+    });
+}
+
+// The ID a carrier's carrier.json names: its label, or a directory carrier's folder name.
+export function carrierId(uplink: UplinkSetting): string {
+    return uplink.carrier.label ?? path.basename(uplink.carrier.path!);
 }
 
 export type { Destination };
