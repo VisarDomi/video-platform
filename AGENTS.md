@@ -15,8 +15,10 @@ deployment's own rules, which come on top of these.
 - **Production runs from this checkout.** Behaviour changes are deliberate and tested;
   deploying is an explicit build (sdk, shared, plug-ins, then the packages), never a side
   effect of a restart. Never rebuild the pipeline's build while its worker runs.
-- **Browsers:** the system Chromium only, with its sandbox for anything that opens a live
-  website (`packages/sdk/test/systemBrowsers.test.mjs`).
+- **Browsers:** every launch names an installed browser that its system keeps updated, never
+  one Playwright downloads, and keeps the browser's sandbox for anything that opens a live
+  website (`packages/sdk/test/systemBrowsers.test.mjs`). On the Linux host that is the system
+  Chromium, headful on the virtual display (`video-xvfb.service`), never on a person's screen.
 - **Current state only.** Docs and comments describe the current behavior only; history
   lives in git and in `docs/STORIES.md`.
 - Work in a git worktree; leave other sessions' edits and processes alone.
