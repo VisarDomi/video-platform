@@ -55,7 +55,8 @@ export interface CampaignWorkerOptions {
     readonly uploadHold?: string | null;
 }
 
-function ordered(recordings: readonly Recording[], providerFilter: string): Recording[] {
+// Campaign order: edited recordings of the filter's sites, oldest capture first.
+export function ordered(recordings: readonly Recording[], providerFilter: string): Recording[] {
     return recordings.filter((recording) => recording.sourceKind === "edited"
         && (providerFilter === "all" || recording.provider === providerFilter)
         && captureKeyFromFolderName(path.basename(recording.sourcePath)) !== null)

@@ -410,6 +410,29 @@ function renderBudget() {
   text('budget-note', `${bytes(b.daily, 0)} more at midnight (${date(b.next_release)}). Unused allowance carries over within the month; at most ${bytes(2 * b.daily, 0)} a day.${ahead}`);
 }
 
+// The carrier drive: where it is, what it holds for the office, what waits for it.
+function renderCarrier() {
+  const k = data.carrier;
+  $('carrier-block').hidden = !k;
+  if (!k) return;
+  const where = { home: 'IN THE PC', away: 'AWAY', uplink: 'AT THE OFFICE' }[k.location] || 'NOT SEEN YET';
+  text('carrier-where', `${k.id} · ${where}${k.seen_at ? ' · ' + ago(k.seen_at) : ''}`);
+  const numbers = $('carrier-numbers');
+  numbers.replaceChildren();
+  for (const [value, label] of [
+    [bytes(k.on_drive_bytes, 0), `On it (${k.files} file${k.files === 1 ? '' : 's'})`],
+    [bytes(k.waiting_bytes, 0), 'Waiting for it'],
+    [k.free_bytes === null ? '—' : bytes(k.free_bytes, 0), 'Free on it'],
+  ]) {
+    const n = el('div', 'budget-value');
+    n.append(el('strong', '', value), el('span', '', label));
+    numbers.append(n);
+  }
+  const notes = { ready: 'Ready: it may be pulled at any moment.', full: 'Full: take it to the office.',
+    unknown: 'This drive is not set up as the carrier (carrier-init).', done: 'The office sent everything: bring it home.' };
+  text('carrier-note', [notes[k.notice] || '', k.note || ''].filter(Boolean).join(' '));
+}
+
 function svgNode(name, attributes) {
   const n = document.createElementNS('http://www.w3.org/2000/svg', name);
   for (const [key, value] of Object.entries(attributes || {})) n.setAttribute(key, String(value));
@@ -795,6 +818,7 @@ function render(snapshot, isLive) {
   renderStages();
   renderUpNext();
   renderBudget();
+  renderCarrier();
   renderHistory();
   renderShorts();
   renderStorage();

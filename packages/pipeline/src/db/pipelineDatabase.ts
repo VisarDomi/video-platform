@@ -85,6 +85,30 @@ interface ResolutionReviewArtifactRow extends ArtifactRow {
 
 interface UsageRow { spent: number; reserved: number }
 
+export type CarrierFileState = "copied" | "uploaded" | "removed";
+export interface CarrierFile {
+    readonly carrierId: string;
+    readonly fileName: string;
+    readonly recordingId: string;
+    readonly artifactPart: string;
+    readonly sizeBytes: number;
+    readonly sha256: string;
+    readonly state: CarrierFileState;
+    readonly copiedAt: string;
+    readonly settledAt: string | null;
+}
+export interface CarrierState {
+    readonly carrierId: string;
+    // home: in the PC; away: not seen anywhere; uplink: seen by the uplink's runner.
+    readonly location: "home" | "away" | "uplink";
+    readonly seenAt: string;
+    readonly freeBytes: number | null;
+    readonly inTransitBytes: number;
+    readonly note: string | null;
+    readonly lastNotice: string | null;
+    readonly lastNoticeAt: string | null;
+}
+
 interface ProvenanceRow {
     recording_id: string;
     observed_identifier: string;
@@ -1739,6 +1763,98 @@ export class PipelineDatabase {
         return row ? { carrierId: row.carrier_id, fileName: row.file_name, sizeBytes: row.size_bytes, sha256: row.sha256 } : null;
     }
 
+    // ---- carriers ----
+
+    carrierFiles(carrierId?: string, state?: CarrierFileState): CarrierFile[] {
+        const where = [carrierId === undefined ? "" : "carrier_id = ?", state === undefined ? "" : "state = ?"].filter(Boolean);
+        const rows = this.database.prepare(`SELECT * FROM carrier_files ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+            ORDER BY copied_at, file_name`).all(...[carrierId, state].filter((value) => value !== undefined) as string[]) as unknown as Array<{
+            carrier_id: string; file_name: string; recording_id: string; artifact_part: string; size_bytes: number; sha256: string;
+            state: CarrierFileState; copied_at: string; settled_at: string | null }>;
+        return rows.map((row) => ({ carrierId: row.carrier_id, fileName: row.file_name, recordingId: row.recording_id,
+            artifactPart: row.artifact_part, sizeBytes: row.size_bytes, sha256: row.sha256, state: row.state,
+            copiedAt: row.copied_at, settledAt: row.settled_at }));
+    }
+
+    // What becomes of a copied file: kept for the other uplink, or deleted because the site
+    // accepted its upload ("uploaded") or it is stale ("removed": the recording was banned,
+    // converted again, or left the upload path).
+    carrierFileVerdict(file: Pick<CarrierFile, "recordingId" | "sha256">): "keep" | "uploaded" | "removed" {
+        const recording = this.get(file.recordingId);
+        if (!recording) return "removed";
+        const accepted = this.database.prepare(`SELECT 1 FROM upload_artifact_receipts x JOIN upload_attempts a ON a.id = x.attempt_id
+            WHERE x.recording_id = ? AND x.sha256 = ? AND x.accepted_at IS NOT NULL AND a.remote_id IS NOT NULL LIMIT 1`)
+            .get(file.recordingId, file.sha256);
+        if (accepted) return "uploaded";
+        if (this.database.prepare("SELECT 1 FROM provider_removals WHERE recording_id = ? LIMIT 1").get(file.recordingId)) return "removed";
+        if (this.getArtifact(file.recordingId)?.sha256 !== file.sha256) return "removed";
+        return ["metadata_ready", "upload_admitted", "uploading", "upload_uncertain", "artifact_valid", "described"].includes(recording.state)
+            ? "keep" : "removed";
+    }
+
+    // Records a file the PC copied to a carrier and read back, in one transaction, only while
+    // the recording is still ready for upload with this very artifact and on no carrier (a
+    // home upload may have taken it meanwhile: the caller then deletes the copy).
+    recordCarrierCopy(carrierId: string, fileName: string, recordingId: string, sha256: string, now = new Date()): boolean {
+        return this.transaction(() => {
+            const recording = this.get(recordingId);
+            const artifact = this.getArtifact(recordingId);
+            if (recording?.state !== "metadata_ready" || !artifact || artifact.sha256 !== sha256 || this.carrierCopy(recordingId)) return false;
+            this.database.prepare(`INSERT INTO carrier_files (carrier_id, file_name, recording_id, artifact_part, size_bytes, sha256,
+                state, copied_at, settled_at) VALUES (?, ?, ?, ?, ?, ?, 'copied', ?, NULL)
+                ON CONFLICT (carrier_id, file_name) DO UPDATE SET recording_id = excluded.recording_id,
+                    artifact_part = excluded.artifact_part, size_bytes = excluded.size_bytes, sha256 = excluded.sha256,
+                    state = 'copied', copied_at = excluded.copied_at, settled_at = NULL`)
+                .run(carrierId, fileName, recordingId, this.getArtifactPart(recordingId) ?? "full", artifact.sizeBytes, sha256, now.toISOString());
+            return true;
+        });
+    }
+
+    settleCarrierFile(carrierId: string, fileName: string, state: "uploaded" | "removed", now = new Date()): void {
+        this.database.prepare(`UPDATE carrier_files SET state = ?, settled_at = ? WHERE carrier_id = ? AND file_name = ? AND state = 'copied'`)
+            .run(state, now.toISOString(), carrierId, fileName);
+    }
+
+    // A carrier that never comes back: its files are the PC's again (the PC kept every one).
+    writeOffCarrier(carrierId: string, now = new Date()): number {
+        return this.transaction(() => {
+            const result = this.database.prepare(`UPDATE carrier_files SET state = 'removed', settled_at = ? WHERE carrier_id = ? AND state = 'copied'`)
+                .run(now.toISOString(), carrierId);
+            this.database.prepare("DELETE FROM carrier_state WHERE carrier_id = ?").run(carrierId);
+            return Number(result.changes);
+        });
+    }
+
+    carrierState(carrierId: string): CarrierState | null {
+        const row = this.database.prepare("SELECT * FROM carrier_state WHERE carrier_id = ?").get(carrierId) as {
+            carrier_id: string; location: CarrierState["location"]; seen_at: string; free_bytes: number | null; in_transit_bytes: number;
+            note: string | null; last_notice: string | null; last_notice_at: string | null } | undefined;
+        return row ? { carrierId: row.carrier_id, location: row.location, seenAt: row.seen_at, freeBytes: row.free_bytes,
+            inTransitBytes: row.in_transit_bytes, note: row.note, lastNotice: row.last_notice, lastNoticeAt: row.last_notice_at } : null;
+    }
+
+    // Where a carrier was last seen; a new location forgets the last notice (the next one
+    // after a plug-in is sent again).
+    saveCarrierState(carrierId: string, state: { location: CarrierState["location"]; freeBytes: number | null; note: string | null }, now = new Date()): CarrierState {
+        const inTransit = (this.database.prepare(`SELECT COALESCE(SUM(size_bytes), 0) AS bytes FROM carrier_files
+            WHERE carrier_id = ? AND state = 'copied'`).get(carrierId) as { bytes: number }).bytes;
+        this.database.prepare(`INSERT INTO carrier_state (carrier_id, location, seen_at, free_bytes, in_transit_bytes, note, last_notice, last_notice_at)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL) ON CONFLICT (carrier_id) DO UPDATE SET
+                last_notice = CASE WHEN carrier_state.location = excluded.location THEN carrier_state.last_notice ELSE NULL END,
+                last_notice_at = CASE WHEN carrier_state.location = excluded.location THEN carrier_state.last_notice_at ELSE NULL END,
+                location = excluded.location, seen_at = excluded.seen_at, free_bytes = COALESCE(excluded.free_bytes, carrier_state.free_bytes),
+                in_transit_bytes = excluded.in_transit_bytes, note = excluded.note`)
+            .run(carrierId, state.location, now.toISOString(), state.freeBytes, inTransit, state.note);
+        return this.carrierState(carrierId)!;
+    }
+
+    // Records a notice as sent; false when it was the last one sent at this location.
+    noteCarrierNotice(carrierId: string, notice: string, now = new Date()): boolean {
+        const result = this.database.prepare(`UPDATE carrier_state SET last_notice = ?, last_notice_at = ?
+            WHERE carrier_id = ? AND last_notice IS NOT ?`).run(notice, now.toISOString(), carrierId, notice);
+        return Number(result.changes) === 1;
+    }
+
     // Bytes billed to a month and bytes reserved for it; per uplink, or all uplinks together
     // when none is named.
     uploadUsage(month: string, uplink?: string): UsageRow {
@@ -1799,6 +1915,7 @@ export class PipelineDatabase {
                 throw new Error("Recording already has a remote upload or unresolved acceptance; refusing another destination");
             }
             if (!this.canAttemptUpload(id, now)) throw new Error("Weekly upload retry deadline has not elapsed");
+            if (uplink === HOME_UPLINK && this.carrierCopy(id)) throw new Error(`Recording ${id} is on a carrier; it uploads from the other uplink`);
             const artifactPart = this.getArtifactPart(id);
             if (!artifactPart) throw new Error(`Recording ${id} has no production artifact part`);
             const budget = this.uploadBudget(now, timeZone, dailyBytes, uplink);
@@ -2234,6 +2351,12 @@ export class PipelineDatabase {
                 (transfer_started = 1 OR progress_bytes > 0 OR transmitted_bytes > 0 OR status IN ('uncertain', 'accepted'))`)
             .get(id, this.getArtifactPart(id) ?? "full") as { deadline: string | null };
         return !row.deadline || row.deadline <= now.toISOString();
+    }
+
+    // An upload of this recording is in flight (reserved, or an attempt not settled yet).
+    hasActiveUploadAttempt(id: string): boolean {
+        return !!this.database.prepare(`SELECT 1 FROM upload_attempts WHERE recording_id = ? AND status = 'started'
+            UNION ALL SELECT 1 FROM upload_reservations WHERE recording_id = ? AND status = 'reserved' LIMIT 1`).get(id, id);
     }
 
     hasUploadAttempt(id: string): boolean {

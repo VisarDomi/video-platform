@@ -260,6 +260,23 @@ def upload_budget(db, control, now, uplinks=()):
             "uplinks": [home] + [uplink_allowance(db, item["id"], item["daily"], now) for item in uplinks]}
 
 
+def carrier_summary(db, uplink, ready_bytes, budget):
+    """Where the carrier drive is, what it holds for the other uplink, and about how much waits for it."""
+    carrier = uplink.get("carrier") or {}
+    carrier_id = carrier.get("label") or Path(str(carrier.get("path") or "carrier")).name
+    state = db.execute("SELECT * FROM carrier_state WHERE carrier_id=?", (carrier_id,)).fetchone()
+    on_drive, files = db.execute("SELECT COALESCE(SUM(size_bytes),0), COUNT(*) FROM carrier_files WHERE carrier_id=? AND state='copied'",
+                                 (carrier_id,)).fetchone()
+    in_transit_ready = db.execute("""SELECT COALESCE(SUM(f.size_bytes),0) FROM carrier_files f JOIN recordings r ON r.id=f.recording_id
+        WHERE f.state='copied' AND r.state='metadata_ready'""").fetchone()[0]
+    reserve = budget["remaining"] + budget["daily"]
+    return {"id": carrier_id, "location": state["location"] if state else None, "seen_at": state["seen_at"] if state else None,
+            "free_bytes": state["free_bytes"] if state else None, "note": state["note"] if state else None,
+            "notice": state["last_notice"] if state else None, "on_drive_bytes": on_drive, "files": files,
+            "capacity_bytes": int(carrier.get("capacityBytes", 0)),
+            "waiting_bytes": max(0, ready_bytes - in_transit_ready - reserve)}
+
+
 def uploads_held(control, worker_step):
     """Why uploads are held while conversion goes on (None: they are not)."""
     if control["state"] == "paused" and control["attention_reason"]:
@@ -409,11 +426,13 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         uplink = uplink_setting(data_root)
         budget = upload_budget(db, control, now, [{"id": uplink["id"], "daily": int(uplink.get("dailyBytes", 0))}] if uplink else [])
         ahead = None
+        carrier = None
         if uplink:
             ready_bytes = db.execute("SELECT COALESCE(SUM(a.size_bytes),0) FROM recordings r JOIN artifacts a ON a.recording_id=r.id "
                                      "WHERE r.state='metadata_ready'").fetchone()[0]
             ahead = {"ready_bytes": ready_bytes,
                      "limit_bytes": int((uplink.get("carrier") or {}).get("capacityBytes", 0)) + 2 * control["daily_upload_limit_bytes"]}
+            carrier = carrier_summary(db, uplink, ready_bytes, budget)
         # The active destination's shared-session checks (none for a destination without one).
         session = db.execute("SELECT logged_in,occurred_at FROM provider_session_events WHERE provider=? AND kind='keepalive' ORDER BY id DESC LIMIT 1",
                              (control.get("upload_provider"),)).fetchone()
@@ -487,7 +506,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
                        "submitted": totals24["submitted"], "receipts_verified": totals24["verified"], "converted": totals24["converted"]},
             "active": active, "captures": live, "finalization": finalized, "queue": queue,
             "confirmations": confirmations, "shorts": {"waiting": short_waiting, "batches": sorted(batches, key=lambda b: b["id"])},
-            "budget": budget, "ahead": ahead and {**ahead, "uploads_held": uploads_held(control, worker_step)}, "history": [{"date": day, **values} for day, values in days.items()], "activity": activity,
+            "budget": budget, "ahead": ahead and {**ahead, "uploads_held": uploads_held(control, worker_step)}, "carrier": carrier, "history": [{"date": day, **values} for day, values in days.items()], "activity": activity,
             "services": current_services, "service_labels": EXTRA_UNITS, "sources": sources, "destination": control.get("upload_provider"), "storage": storage,
             "authentication": {"confirmed": bool(session and session[0]), "checked_at": session[1] if session else None},
             "monitoring": {"cadence": monitoring.get("cadence"), "last_check": monitoring.get("last_completed_window_end")}}

@@ -47,6 +47,8 @@ class DashboardDataTests(unittest.TestCase):
           CREATE TABLE provider_removals(recording_id TEXT,provider TEXT,remote_id TEXT,reason TEXT,removed_at TEXT);
           CREATE TABLE worker_heartbeat(id INTEGER,updated_at TEXT);
           CREATE TABLE manual_pieces(recording_id TEXT,part TEXT,reason TEXT);
+          CREATE TABLE carrier_files(carrier_id TEXT,file_name TEXT,recording_id TEXT,size_bytes INTEGER,state TEXT);
+          CREATE TABLE carrier_state(carrier_id TEXT,location TEXT,seen_at TEXT,free_bytes INTEGER,note TEXT,last_notice TEXT);
           INSERT INTO campaign_control VALUES (1,'running',25000000000,NULL,NULL,'video-host');
           INSERT INTO worker_heartbeat VALUES (1,'2026-11-01T00:00:00Z');
           INSERT INTO recordings VALUES ('2026-01-01 010000 alice','live-a','/unused','edited',600,'uploading',NULL,NULL,'2026-11-01T00:00:00Z');
@@ -163,6 +165,9 @@ class DashboardDataTests(unittest.TestCase):
                                          "uploads_held": "Destination shared session is logged out"})
         self.assertEqual(data["campaign"]["state"], "uploads_held")
         self.assertEqual([u["id"] for u in data["budget"]["uplinks"]], ["home", "office"])
+        self.assertEqual(data["carrier"]["id"], "CARRIER1")
+        self.assertIsNone(data["carrier"]["location"])
+        self.assertEqual((data["carrier"]["on_drive_bytes"], data["carrier"]["files"], data["carrier"]["capacity_bytes"]), (0, 0, 230000000000))
         self.assertEqual(data["budget"]["uplinks"][1]["daily"], 50000000000)
         self.db.execute("UPDATE campaign_control SET state='running', attention_reason=NULL")
         self.db.execute("UPDATE recordings SET state='metadata_ready'")

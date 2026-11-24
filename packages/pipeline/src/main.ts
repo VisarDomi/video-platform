@@ -9,6 +9,7 @@ import { ensureFinalizedRemuxOne } from "./commands/ensureFinalizedRemuxOne.js";
 import { describeOne } from "./commands/describeOne.js";
 import { uploadOne } from "./commands/uploadOne.js";
 import { probeUplink } from "./uplink/uplinkCommands.js";
+import { carrierStatus, initCarrier, recallCarrier, writeOffCarrier } from "./uplink/carrierCommands.js";
 import { reconcileDueUploads } from "./commands/reconcileUploads.js";
 import { TargetCatalogResolver } from "./provenance/targetResolver.js";
 import { PipelineOrchestrator } from "./scheduler/orchestrator.js";
@@ -42,6 +43,7 @@ function usage(): never {
         "  review | retry ID | upload-plan",
         "  upload-one --recording ID [--uplink ID [--carrier-dir DIR]] --apply | reconcile-uploads --apply",
         "  uplink-probe [--carrier-dir DIR]",
+        "  carrier-init --apply | carrier-status | carrier-recall [--apply] | carrier-writeoff --carrier ID --apply",
         "  upload-provider [--provider DESTINATION --apply]",
         "  metadata-check [--provider DESTINATION]",
         "  plus each destination's own commands (its sites-file entry's \"commands\" package)",
@@ -109,7 +111,8 @@ async function main(): Promise<void> {
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "metadata-check", "uplink-probe"].includes(command ?? "")) {
+        "upload-provider", "metadata-check", "uplink-probe", "carrier-init", "carrier-status", "carrier-recall",
+        "carrier-writeoff"].includes(command ?? "")) {
         // Not a core command: a destination's own (named by its sites-file entry), or none.
         const run = await destinationCommand(command ?? "");
         if (!run) {
@@ -191,6 +194,30 @@ async function main(): Promise<void> {
         const carrierRoot = option(args, "--carrier-dir") ?? undefined;
         if (carrierRoot && !uplink) throw new Error("--carrier-dir needs --uplink");
         console.log(JSON.stringify(await uploadOne(recordingId, pipelineConfig, { uplink, carrierRoot }), null, 2));
+        return;
+    }
+    if (command === "carrier-init") {
+        requireApply(process.argv.slice(3));
+        console.log(JSON.stringify(await initCarrier(pipelineConfig), null, 2));
+        return;
+    }
+    if (command === "carrier-status") {
+        console.log(JSON.stringify(carrierStatus(pipelineConfig), null, 2));
+        return;
+    }
+    if (command === "carrier-recall") {
+        // The worker's carrier lane would copy again what the recall gives back.
+        if (process.argv.includes("--apply")) assertCampaignIdle(pipelineConfig);
+        console.log(JSON.stringify(await recallCarrier(pipelineConfig, process.argv.includes("--apply")), null, 2));
+        return;
+    }
+    if (command === "carrier-writeoff") {
+        const args = process.argv.slice(3);
+        requireApply(args);
+        assertCampaignIdle(pipelineConfig);
+        const carrier = option(args, "--carrier");
+        if (!carrier) usage();
+        console.log(JSON.stringify(writeOffCarrier(pipelineConfig, carrier), null, 2));
         return;
     }
     if (command === "uplink-probe") {

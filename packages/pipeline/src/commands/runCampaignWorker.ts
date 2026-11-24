@@ -14,6 +14,7 @@ import { notifyDesktop, stepNotification } from "../notify.js";
 import { recoveryInProgress, readRecoveryState } from "../upload/sessionRecoveryState.js";
 import { access } from "node:fs/promises";
 import { AccountSlot } from "../campaign/accountSlot.js";
+import { runCarrierLane } from "../uplink/carrierLane.js";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
 // Well inside common PHP session idle limits; one light request each time.
@@ -211,6 +212,10 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     // A waiting step (paused, idle, a cooldown) repeats every 30 seconds and a
     // pending verification is rechecked until it settles: each is logged when it
     // changes, not on every repetition.
+    // The carrier lane runs beside the main loop (the drive copies while conversion runs).
+    const carrierLane = config.uplink ? runCarrierLane(config, signal, (_notice, title, body) => notifyDesktop(title, body))
+        .catch((error: unknown) => console.error(journalPriority("error", 2) + JSON.stringify({ event: "carrier-lane-error", error: String(error) })))
+        : Promise.resolve();
     let lastStep = "";
     let verificationHold: string | null = null;
     const reconcileOutcomes = new Map<string, string>();
@@ -278,4 +283,7 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         }
         await wait(IDLE_POLL_MILLISECONDS, signal);
     }
+    // A copy in progress ends at its next step (a killed one leaves only a .partial file,
+    // which the next pass deletes).
+    await carrierLane;
 }

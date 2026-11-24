@@ -607,6 +607,29 @@ interrupted uploads runs only while it is free (another lane may have an upload 
 A file on a carrier never uploads from home. Without the section, a recording waiting for
 allowance (or any hold) still stops conversion, as before.
 
+The carrier lane runs in the worker beside the campaign when the section names a carrier
+(a drive by its filesystem label, mounted through UDisks only while the PC works on it, or
+a directory). Every 30 seconds, while the carrier is in the PC, one pass: it checks the
+carrier's `carrier.json`; deletes unfinished copies, files the ledger does not know, files
+whose upload the site accepted (row `uploaded`) and stale files (the recording was banned,
+converted again or left the upload path: row `removed`); settles a recorded file that is
+missing or the wrong size (the recording is home's again); then copies the ready
+recordings home does not keep in its reserve (what home may still send today plus one
+daily amount, oldest first), oldest first, while they fit with a margin: the file is
+written as `files/<name>.partial`, flushed, read back against the ledger's hash, renamed,
+the folder flushed, and only then its `copied` row written, and only while the recording
+is still ready with that artifact. Any error ends the pass as "the drive is gone"; the next
+pass repairs whatever it left. The lane notifies once per plug-in when the drive is ready,
+full ("take it to the office") or not a set-up carrier, and records where it was last seen
+(`carrier_state`). The PC keeps its own copy of every file until the site accepted it.
+
+```bash
+node packages/pipeline/dist/main.js carrier-init --apply      # an empty drive becomes the carrier
+node packages/pipeline/dist/main.js carrier-status            # where it is, what it holds, what waits
+node packages/pipeline/dist/main.js carrier-recall [--apply]  # give its files back to home (drive in the PC, worker stopped)
+node packages/pipeline/dist/main.js carrier-writeoff --carrier ID --apply  # a carrier that never comes back
+```
+
 ```bash
 # Where the runner is: its network, the carrier and its files, its browser, its commit.
 node packages/pipeline/dist/main.js uplink-probe [--carrier-dir DIR]
