@@ -248,6 +248,16 @@ child.on('exit', (code) => process.exit(code ?? 1));
 
     // ---- 3. the drive at the office -------------------------------------------------------------
 
+    // The PC holds a signed-in shared session (in production the phone handoff makes it;
+    // here the PC's own destination signs in once, in its state folder).
+    const { destination: formHost } = await import(pathToFileURL(path.join(ROOT, 'plugins/form-host/dist/index.js')).href);
+    const stateDir = path.join(dirs.data, 'pipeline', 'destinations', DESTINATION);
+    mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+    clock.set(now);
+    await formHost.createDestination({ config: { baseUrl: sim.urls[DESTINATION], retryDelayMs: 100 }, stateDir,
+        browser: { executablePath: '/unused', profilePath: '/unused' }, credentials: () => ({ email: 'coach', password: 'pw' }),
+        stopSignal: new AbortController().signal }).withSession(async () => null);
+
     say('the drive goes to the office');
     renameSync(atHome, atOffice);
     await must('carrier-pass', '--apply');

@@ -1785,7 +1785,8 @@ export class PipelineDatabase {
         const accepted = this.database.prepare(`SELECT 1 FROM upload_artifact_receipts x JOIN upload_attempts a ON a.id = x.attempt_id
             WHERE x.recording_id = ? AND x.sha256 = ? AND x.accepted_at IS NOT NULL AND a.remote_id IS NOT NULL LIMIT 1`)
             .get(file.recordingId, file.sha256);
-        if (accepted) return "uploaded";
+        // Or verified online by the daily check (an upload whose ID was found only then).
+        if (accepted || this.database.prepare("SELECT 1 FROM remote_uploads WHERE recording_id = ? LIMIT 1").get(file.recordingId)) return "uploaded";
         if (this.database.prepare("SELECT 1 FROM provider_removals WHERE recording_id = ? LIMIT 1").get(file.recordingId)) return "removed";
         if (this.getArtifact(file.recordingId)?.sha256 !== file.sha256) return "removed";
         return ["metadata_ready", "upload_admitted", "uploading", "upload_uncertain", "artifact_valid", "described"].includes(recording.state)
