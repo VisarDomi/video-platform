@@ -2444,6 +2444,19 @@ export class PipelineDatabase {
         return row ? { attemptId: row.id, recordingId: row.recording_id, evidence: JSON.parse(row.evidence_json) as unknown[] } : null;
     }
 
+    // An upload the owner already accepted below Full-HD (its evidence keeps the marker).
+    acceptedBelowFullHdUpload(provider: string, remoteId: string): { attemptId: string; recordingId: string } | null {
+        const row = this.database.prepare(`SELECT id, recording_id FROM upload_attempts WHERE provider = ? AND remote_id = ?
+            AND status = 'accepted' AND evidence_json LIKE '%"accepted_below_full_hd"%'`).get(provider, remoteId) as
+            { id: string; recording_id: string } | undefined;
+        return row ? { attemptId: row.id, recordingId: row.recording_id } : null;
+    }
+
+    // A conversion held while its published copy was uncertain may be cleaned up once accepted.
+    releaseRetentionHold(attemptId: string): void {
+        this.database.prepare("UPDATE upload_artifact_receipts SET retention_hold = NULL WHERE attempt_id = ?").run(attemptId);
+    }
+
     verifyUpload(attemptId: string, remoteId: string, remoteUrl: string, now = new Date()): Recording {
         return this.transaction(() => {
             const r = this.reconcileUncertain(attemptId, remoteId, remoteUrl, now);

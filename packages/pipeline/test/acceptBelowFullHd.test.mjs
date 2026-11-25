@@ -50,8 +50,19 @@ test("a published copy below Full-HD is verified as it is, with the marker; a dr
     assert.deepEqual(applied.results[0], { remoteId: "5001", recordingId: recording.id, disposition: "accepted_below_full_hd", best: { width: 900, height: 720, label: "720p HD" } });
     assert.equal(database.get(recording.id).state, "cleanup_eligible");
     assert.equal(database.pendingUploadByRemoteId(provider, "5001"), null, "its daily check has ended");
-    // Applied twice: nothing pending is left to accept.
-    assert.equal((await acceptBelowFullHd(database, config, provider, ["5001"], true)).results[0].disposition, "refused");
+    // Applied again: it only finishes what an earlier run could not.
+    assert.equal((await acceptBelowFullHd(database, config, provider, ["5001"], true)).results[0].disposition, "already_accepted");
+});
+
+test("an earlier run without cleanup is finished by the next: the conversion's hold is released and the recording backed up", async (t) => {
+    const { database, recording, provider, attemptId } = await uploaded(t, [{ width: 960, height: 720 }]);
+    database.database.prepare("UPDATE upload_artifact_receipts SET retention_hold = 'legacy published rendition remains uncertain; retain conversion' WHERE attempt_id = ?").run(attemptId);
+    const first = await acceptBelowFullHd(database, { ...config, cleanupEnabled: false }, provider, ["5001"], true);
+    assert.match(first.note, /cleanup is off/);
+    assert.equal(database.get(recording.id).state, "upload_verified");
+    assert.equal(database.database.prepare("SELECT retention_hold FROM upload_artifact_receipts WHERE attempt_id = ?").get(attemptId).retention_hold, null);
+    assert.equal((await acceptBelowFullHd(database, config, provider, ["5001"], true)).results[0].disposition, "already_accepted");
+    assert.equal(database.get(recording.id).state, "cleanup_eligible");
 });
 
 test("an unknown ID, a copy with a Full-HD version, or one the last check found unpublished is refused and stays pending", async (t) => {

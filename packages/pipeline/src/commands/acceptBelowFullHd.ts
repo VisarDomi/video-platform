@@ -13,17 +13,35 @@ type Playback = { stage: "playback_verification"; outcome?: string; remoteUrl?: 
 export interface BelowFullHdResult {
     readonly remoteId: string;
     readonly recordingId?: string;
-    readonly disposition: "accepted_below_full_hd" | "would_accept" | "refused";
+    readonly disposition: "accepted_below_full_hd" | "already_accepted" | "would_accept" | "refused";
     readonly best?: Rendition;
     readonly reason?: string;
 }
 
 export async function acceptBelowFullHd(database: PipelineDatabase, config: PipelineConfig, provider: string,
-    remoteIds: readonly string[], apply: boolean, now = new Date()): Promise<{ results: BelowFullHdResult[]; cleanup?: unknown }> {
+    remoteIds: readonly string[], apply: boolean, now = new Date()): Promise<{ results: BelowFullHdResult[]; cleanup?: unknown; note?: string }> {
     const results: BelowFullHdResult[] = [];
+    // As the worker does after a verification: with cleanup on, a fully verified recording
+    // becomes cleanup-eligible.
+    const backedUp = (recordingId: string, remoteId: string) => {
+        if (config.cleanupEnabled && database.get(recordingId)?.state === "upload_verified" && !database.getComparisonTrial()) {
+            database.transition(recordingId, "upload_verified", "cleanup_eligible",
+                `all required parts verified online (${remoteId} accepted below Full-HD)`, now);
+        }
+    };
     for (const remoteId of remoteIds) {
         const upload = database.pendingUploadByRemoteId(provider, remoteId);
-        if (!upload) { results.push({ remoteId, disposition: "refused", reason: "no pending check of an upload with this ID" }); continue; }
+        if (!upload) {
+            // Accepted before: finish what that run could not (a hold, the backed-up state).
+            const accepted = database.acceptedBelowFullHdUpload(provider, remoteId);
+            if (!accepted) { results.push({ remoteId, disposition: "refused", reason: "no pending check of an upload with this ID" }); continue; }
+            if (apply) {
+                database.releaseRetentionHold(accepted.attemptId);
+                backedUp(accepted.recordingId, remoteId);
+            }
+            results.push({ remoteId, recordingId: accepted.recordingId, disposition: apply ? "already_accepted" : "would_accept" });
+            continue;
+        }
         // Only a copy the last check found published, playable, and below Full-HD.
         const last = upload.evidence.filter((entry): entry is Playback => (entry as Playback)?.stage === "playback_verification").at(-1);
         const best = [...(last?.renditions ?? [])].sort((a, b) => b.width * b.height - a.width * a.height)[0];
@@ -39,14 +57,13 @@ export async function acceptBelowFullHd(database: PipelineDatabase, config: Pipe
         if (!apply) { results.push({ remoteId, recordingId: upload.recordingId, disposition: "would_accept", best }); continue; }
         database.recordUploadEvidence(upload.attemptId, { stage: "accepted_below_full_hd", remoteId, remoteUrl: url, best,
             checkedAt: last.checkedAt ?? null, reason: "owner decision: a published copy below Full-HD counts as backed up" }, now);
-        const verified = database.verifyUpload(upload.attemptId, remoteId, url, now);
-        if (config.cleanupEnabled && verified.state === "upload_verified" && !database.getComparisonTrial()) {
-            database.transition(upload.recordingId, "upload_verified", "cleanup_eligible",
-                `all required parts verified online (${remoteId} accepted below Full-HD, best ${best.width}x${best.height})`, now);
-        }
+        database.releaseRetentionHold(upload.attemptId);
+        database.verifyUpload(upload.attemptId, remoteId, url, now);
+        backedUp(upload.recordingId, remoteId);
         results.push({ remoteId, recordingId: upload.recordingId, disposition: "accepted_below_full_hd", best });
     }
-    const cleanup = apply && results.some(result => result.disposition === "accepted_below_full_hd")
+    const cleanup = apply && results.some(result => result.disposition === "accepted_below_full_hd" || result.disposition === "already_accepted")
         ? await cleanupAcceptedConversions(database, config, now) : undefined;
-    return { results, ...(cleanup ? { cleanup } : {}) };
+    return { results, ...(cleanup ? { cleanup } : {}),
+        ...(apply && !config.cleanupEnabled ? { note: "cleanup is off here: run with the worker's VIDEO_PIPELINE_CLEANUP=1" } : {}) };
 }

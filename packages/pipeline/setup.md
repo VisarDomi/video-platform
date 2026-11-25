@@ -248,9 +248,10 @@ a published but uncertain rendition is retained for verification, checked daily 
 destination keeps a published copy; it is never uploaded again). The owner may accept a
 published copy whose best version stays below Full-HD as backed up:
 `accept-below-full-hd --remote-id <id> [--remote-id <id> ...] --apply` (worker stopped; without
-`--apply` a preview) verifies it as it is, ending its daily check, cleaning up its conversion
-and making its original cleanup-eligible; its evidence keeps `accepted_below_full_hd` with the
-best version found. It refuses any ID whose last check found no published copy or a Full-HD
+`--apply` a preview; with the worker's `VIDEO_PIPELINE_CLEANUP=1`) verifies it as it is, ending
+its daily check, releasing its conversion's retention hold and cleaning the conversion up, and
+making its original cleanup-eligible; its evidence keeps `accepted_below_full_hd` with the best
+version found. Run again on an accepted copy, it finishes what an earlier run could not. It refuses any ID whose last check found no published copy or a Full-HD
 version. Known provider
 removals and previously verified copies later removed remain restoration bans.
 All retry traffic counts against the uplink's allowance.
