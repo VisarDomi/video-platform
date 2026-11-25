@@ -14,6 +14,7 @@ import { verifyCurrentServerAuthority } from '../dist/discovery/verifyCurrentAut
 import { cancelInvalidShortBatch, compatibleShortGroups, maintainAutomaticShorts, poolRecordingPart } from '../dist/campaign/shorts.js';
 import { CampaignWorker } from '../dist/campaign/campaignWorker.js';
 import { createDefaultStages } from '../dist/stages/defaultStages.js';
+import { composeUploadMetadata } from '../dist/metadata/composeUploadMetadata.js';
 
 const mediaRoot = await mkdtemp(path.join(os.tmpdir(), 'short-test-media-'));
 after(() => rm(mediaRoot, { recursive: true, force: true }));
@@ -155,11 +156,24 @@ test('pipeline joins compatible shorts through canonical streamer identity, pres
     assert.equal(f.database.shortParts(b.id)[0].batchId,batch.id);
 });
 
+test('a joined batch is named after its first part: the hash stays in the ledger key only',async t=>{
+    const f=await fixture(t);const a=await f.add('alice-old');await f.add('alice-new');
+    const result=await maintainAutomaticShorts(f.database,f.config,f.resolver);
+    const batch=f.database.get(result.joined[0]);
+    assert.match(batch.id,/ joined-[0-9a-f]{12}$/);
+    assert.equal(path.basename(batch.sourcePath),path.basename(a.source));
+    assert.equal(path.basename(path.dirname(batch.sourcePath)),batch.id);
+    const metadata=composeUploadMetadata(batch,{output:{title:'A woman at a desk',description:'A woman sits at a desk and talks to the camera for a while.',tags:[]}},
+        f.database.getProvenance(batch.id));
+    assert.ok(metadata.title.endsWith(` [${path.basename(a.source)}]`),metadata.title);
+    assert.doesNotMatch(`${metadata.title}\n${metadata.description}`,/joined|[0-9a-f]{12}/);
+});
+
 test('long streamer labels leave room for filesystem-safe artifact names without losing member identity',async t=>{
     const f=await fixture(t);const alias='alice'+'x'.repeat(170);const original=await f.add(alias);await f.add(alias);
     const result=await maintainAutomaticShorts(f.database,f.config,f.resolver);assert.equal(result.joined.length,1);
     const batch=f.database.get(result.joined[0]);
-    assert.ok(Buffer.byteLength(path.basename(batch.sourcePath)+'.production-v6-ccw.mp4')<=255);
+    assert.ok(Buffer.byteLength(batch.id+'.production-v6-ccw.mp4')<=255);
     assert.equal(f.database.shortParts(original.id)[0].batchId,batch.id);
     assert.match(batch.id,/^2026-01-01 000000 /);
 });
@@ -269,7 +283,10 @@ test('user deletion cancels an unsent batch without restoring files or blocking 
     assert.equal((await maintainAutomaticShorts(f.database,f.config,f.resolver)).joined.length,0);
     await assert.rejects(readFile(path.join(a.source,'playlist.m3u8')),/ENOENT/);
     assert.ok(await readFile(path.join(b.source,'0.ts')));
-    assert.equal(f.database.get(result.joined[0]).state,'short_cancelled');
+    const cancelled=f.database.get(result.joined[0]);
+    assert.equal(cancelled.state,'short_cancelled');
+    await assert.rejects(readFile(path.join(path.dirname(cancelled.sourcePath),path.basename(cancelled.sourcePath),'playlist.m3u8')),/ENOENT/);
+    await assert.rejects(realpath(path.dirname(cancelled.sourcePath)),/ENOENT/,'the whole joined folder is gone');
 });
 
 test('fMP4 joins preserve separate init maps and fragment boundaries',async t=>{

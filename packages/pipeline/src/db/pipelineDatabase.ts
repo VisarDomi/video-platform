@@ -132,6 +132,7 @@ interface DescriptionRow {
 }
 
 function recordingId(input: RecordingInput): string {
+    if (input.id) return input.id;
     // The folder name (datetime + alias) is the identity; the disk is the
     // source of truth.
     const basename = path.basename(path.resolve(input.sourcePath));

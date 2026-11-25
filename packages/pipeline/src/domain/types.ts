@@ -3,6 +3,9 @@ import type { PipelineState } from "./states.js";
 export type SourceKind = "downloader" | "edited";
 
 export interface RecordingInput {
+    // The ledger key when the folder name is not it (a joined batch, whose folder carries
+    // its first part's name); otherwise the folder name.
+    readonly id?: string;
     readonly provider: string;
     readonly sourceKind: SourceKind;
     readonly sourcePath: string;

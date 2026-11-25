@@ -85,12 +85,15 @@ export async function buildShortBatch(database: PipelineDatabase, config: Pipeli
     if (!provenance?.streamerId) throw new Error("Joined shorts require a resolved streamer");
     const signature = JSON.stringify(parts.map(p => [p.recordingId, p.part, p.sourceFingerprint, p.destinationProvider, p.durationSeconds]));
     const hash = createHash("sha256").update(signature).digest("hex").slice(0, 12);
-    // Preserve capture date/name, leaving room for generated artifact suffixes
-    // even when an original streamer label is long or uses multibyte text.
+    // The ledger key: the capture date/name and the members' hash, leaving room for generated
+    // artifact suffixes even when an original streamer label is long or uses multibyte text.
+    // Everything public (the title, the lookup identity, the footer) reads the folder's name,
+    // which is the first part's: joined-sources/<key>/<first part's folder name>.
     const batchId = `${Array.from(first.id).slice(0, 50).join("")} joined-${hash}`;
     const parent = path.join(config.stagingRoot, "joined-sources");
-    const target = path.join(parent, batchId);
-    await fs.mkdir(parent, { recursive: true });
+    const container = path.join(parent, batchId);
+    const target = path.join(container, path.basename(first.sourcePath));
+    await fs.mkdir(container, { recursive: true });
     if (await fs.realpath(parent) !== path.resolve(parent)) throw new Error("Joined source root cannot contain symlinks");
     const temporary = path.join(parent, `.join-${randomUUID()}`);
     await fs.mkdir(temporary);
@@ -151,6 +154,7 @@ export async function buildShortBatch(database: PipelineDatabase, config: Pipeli
             if (await fs.lstat(target).catch(() => null)) throw new Error("Unrecognized joined input directory");
             await fs.rename(temporary, target);
         }
+        await syncDirectory(container);
         await syncDirectory(parent);
         await syncDirectory(config.stagingRoot);
         const inspection = await inspectFinalizedRecording(target, first.provider, "edited");
@@ -159,7 +163,7 @@ export async function buildShortBatch(database: PipelineDatabase, config: Pipeli
         }
         const shapePlan = planRecordingShapes(await analyzeRecordingResolution(inspection.recording.playlistPath));
         if (shapePlan.upload.length + shapePlan.manual.length !== 1) throw new Error("Joined inputs have incompatible shapes");
-        return database.createShortBatch(inspection.recording, provenance, parts, now);
+        return database.createShortBatch({ ...inspection.recording, id: batchId }, provenance, parts, now);
     } finally {
         await fs.rm(temporary, { recursive: true, force: true });
     }
@@ -275,9 +279,11 @@ export async function cancelInvalidShortBatch(database: PipelineDatabase, config
     const batch = database.get(id);
     const members = database.shortParts(undefined, id);
     if (!batch || !members.length || !database.cancelUnsentShortBatch(id, reason, now)) return false;
+    // joined-sources/<key>/<first part's name>: the whole <key> folder goes.
     const parent = path.resolve(config.stagingRoot, "joined-sources");
-    if (path.dirname(path.resolve(batch.sourcePath)) !== parent) throw new Error("Unsafe cancelled joined source path");
-    await fs.rm(batch.sourcePath, { recursive: true, force: true });
+    const container = path.dirname(path.resolve(batch.sourcePath));
+    if (path.dirname(container) !== parent || path.basename(container) !== batch.id) throw new Error("Unsafe cancelled joined source path");
+    await fs.rm(container, { recursive: true, force: true });
     for (const memberId of new Set(members.map(p => p.recordingId))) {
         const member = database.get(memberId)!;
         const inspection = await inspectFinalizedRecording(member.sourcePath, member.provider, member.sourceKind);

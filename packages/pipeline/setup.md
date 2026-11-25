@@ -147,9 +147,12 @@ remain separate. Clips are chronological and assigned once. Insufficient
 compatible footage waits normally, without a manual-review notification.
 
 At the destination minimum, the campaign creates a
-normal pipeline recording named `<first-recording prefix> joined-<hash>`. Its durable
-input playlist has per-clip discontinuities and distinct init maps, under
-`artifacts/production-v6/joined-sources/`. Media entries link to unchanged
+normal pipeline recording. Everything public carries its first clip's name: the upload
+title ends `[<first clip's folder>]`, the lookup identity and the description footer are
+that folder's. Only the ledger key adds the members' hash
+(`<first-recording prefix> joined-<hash>`, which also names the conversion file). Its
+durable input playlist has per-clip discontinuities and distinct init maps, in
+`artifacts/production-v6/joined-sources/<ledger key>/<first clip's folder>/`. Media entries link to unchanged
 originals, so the derived inputs retain no extra media bytes. The normal
 conversion, validation, descriptor, metadata, upload and daily verification
 stages process the batch. Actual encoded duration is checked too: an unsent batch
