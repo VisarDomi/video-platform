@@ -78,3 +78,32 @@ test('managed startup never adopts or stops an unrelated healthy endpoint',async
     await llama.stop();
     assert.equal((await fetch(`${config.modelUrl}/health`)).status,200);
 });
+
+test('slow startup progress logs elapsed seconds, last llama-server line and io pressure', async t => {
+    const { config } = await fixture(t, 'slow');
+    const root = path.dirname(config.runtimeExecutable);
+    const verboseExe = path.join(root, 'fake-llama-verbose');
+    await writeFile(verboseExe, `#!${process.execPath}
+const http = require('node:http');
+console.error('llama_model_loader: loading tensors from fixture.gguf');
+const port = Number(process.argv[process.argv.indexOf('--port')+1]);
+const start = Date.now();
+const server = http.createServer((req,res)=> {
+  res.writeHead(Date.now()-start>=700 ? 200 : 503); res.end('{}');
+});
+server.listen(port,'127.0.0.1');
+process.on('SIGTERM',()=>{server.closeAllConnections();server.close(()=>process.exit(0));});
+`);
+    await chmod(verboseExe, 0o700);
+    const llama = new LlamaServer({ ...config, runtimeExecutable: verboseExe }, 100);
+    t.after(() => llama.stop());
+    const logs = [];
+    const orig = console.log;
+    console.log = (line) => logs.push(String(line));
+    try { await llama.start(); } finally { console.log = orig; }
+    const progress = logs.map(l => { try { return JSON.parse(l); } catch { return null; } }).find(e => e?.event === 'descriptor-starting');
+    assert(progress, 'expected descriptor-starting progress event');
+    assert.equal(typeof progress.elapsedSeconds, 'number');
+    assert.match(progress.lastLogLine, /loading tensors/);
+    assert('ioPressureSomeAvg10' in progress);
+});

@@ -1,7 +1,19 @@
 import { ChildProcess, spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { descriptorConfig } from "./config.js";
+
+async function readIoPressureSomeAvg10(): Promise<number | null> {
+    try {
+        const text = await readFile("/proc/pressure/io", "utf8");
+        const match = text.match(/^some\s+avg10=([\d.]+)/m);
+        const value = match ? Number(match[1]) : Number.NaN;
+        return Number.isFinite(value) ? value : null;
+    } catch {
+        return null;
+    }
+}
 
 // The managed server did not start: it failed to launch, exited, or did not answer its
 // health check in time. About the machine (a disk too slow to load the model, a busy GPU),
@@ -20,7 +32,10 @@ export class LlamaServer {
     private failureLines: string[] = [];
     private stopping = false;
 
-    constructor(private readonly config = descriptorConfig) {
+    constructor(
+        private readonly config = descriptorConfig,
+        private readonly progressIntervalMilliseconds = 30_000,
+    ) {
         for (const value of [config.startupTimeoutMilliseconds, config.healthRequestTimeoutMilliseconds]) {
             if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Descriptor timeouts must be positive integers");
         }
@@ -146,10 +161,15 @@ export class LlamaServer {
         });
     }
 
+    private lastOutputLine(): string | null {
+        const lines = this.logTail.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        return lines.length ? lines[lines.length - 1].slice(0, 200) : null;
+    }
+
     private async waitUntilHealthy(): Promise<void> {
         const startedAt = Date.now();
         const deadline = startedAt + this.config.startupTimeoutMilliseconds;
-        let nextProgress = startedAt + 30_000;
+        let nextProgress = startedAt + this.progressIntervalMilliseconds;
         while (Date.now() < deadline) {
             if (this.stopping) throw new Error("Descriptor startup was stopped");
             if (this.launchError) throw new DescriptorStartupError(`Failed to launch llama-server: ${this.launchError.message}`);
@@ -165,8 +185,13 @@ export class LlamaServer {
             } catch {
             }
             if (Date.now() >= nextProgress) {
-                console.log(JSON.stringify({ event: "descriptor-starting", elapsedSeconds: (Date.now() - startedAt) / 1000 }));
-                nextProgress = Date.now() + 30_000;
+                console.log(JSON.stringify({
+                    event: "descriptor-starting",
+                    elapsedSeconds: (Date.now() - startedAt) / 1000,
+                    ioPressureSomeAvg10: await readIoPressureSomeAvg10(),
+                    lastLogLine: this.lastOutputLine(),
+                }));
+                nextProgress = Date.now() + this.progressIntervalMilliseconds;
             }
             await delay(Math.max(1, Math.min(500, deadline - Date.now())));
         }

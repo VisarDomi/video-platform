@@ -15,6 +15,7 @@ import { officeTick } from "./uplink/officeLane.js";
 import { carrierStatus, initCarrier, recallCarrier, writeOffCarrier } from "./uplink/carrierCommands.js";
 import { reconcileDueUploads } from "./commands/reconcileUploads.js";
 import { TargetCatalogResolver } from "./provenance/targetResolver.js";
+import { allowsUpload } from "./provenance/uploadPolicy.js";
 import { PipelineOrchestrator } from "./scheduler/orchestrator.js";
 import { createDefaultStages } from "./stages/defaultStages.js";
 import {
@@ -344,20 +345,21 @@ async function main(): Promise<void> {
             return;
         }
         if (command === "provenance-refresh") {
-            requireApply(process.argv.slice(3));
+            const args = process.argv.slice(3);
+            requireApply(args);
+            const onlyReview = args.includes("--review-required");
+            const targets = onlyReview ? database.list("provenance_review_required") : database.list();
             const resolver = TargetCatalogResolver.load({ serverUrl: pipelineConfig.serverUrl });
             let resolved = 0;
             let reviewRequired = 0;
-            for (const recording of database.list()) {
+            for (const recording of targets) {
                 const resolution = await resolver.resolve(recording);
                 const provenance = database.saveProvenance(recording.id,
                     database.getProvenanceOverride(recording.provider, resolution.observedIdentifier) ?? resolution);
                 if (provenance.status === "review_required") reviewRequired++;
-                else {
-                    resolved++;
-                    if (database.get(recording.id)?.state === "provenance_review_required") {
-                        database.transition(recording.id, "provenance_review_required", "described", "provenance resolver succeeded");
-                    }
+                else resolved++;
+                if (allowsUpload(provenance) && database.get(recording.id)?.state === "provenance_review_required") {
+                    database.transition(recording.id, "provenance_review_required", "described", "provenance resolver succeeded");
                 }
             }
             console.log(JSON.stringify({ resolved, reviewRequired }, null, 2));

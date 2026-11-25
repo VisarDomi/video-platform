@@ -202,3 +202,29 @@ test("the account slot: one holder; a waiter gets it when it is given back", asy
     assert.equal(await slot.ifFree("f", () => 8), null);
     busy();
 });
+
+test("ahead mode resolves missing provenance on already-discovered recordings before composing metadata", async (t) => {
+    const f = await fixture(t, { local: ["2026-01-23 150039 990001"] });
+    const rec = f.recordings["2026-01-23 150039 990001"];
+    f.database.transition(rec.id, "server_ready", "remuxed");
+    const sha256 = "c".repeat(64);
+    f.database.saveArtifact(rec.id, { path: path.join(f.root, rec.id + ".mp4"), sizeBytes: 1_000, sha256, validatedAt: NOW.toISOString() });
+    f.database.saveDescription(rec.id, {
+        artifactSha256: sha256, promptVersion: "test-v1", fps: 2,
+        output: { title: "Title", description: "Description.", tags: [] },
+        evidencePath: path.join(f.root, "evidence.json"),
+    });
+    f.database.recordResolutionPolicyAssessment(rec.id, "resolution-policy-v6: test fixture");
+    assert.equal(f.database.getProvenance(rec.id), null);
+    const resolver = TargetCatalogResolver.load({
+        resolveIdentifier: async (_provider, identifier) => ({
+            id: identifier, label: identifier, channelUrl: `https://live-a.example/${identifier}/`, aliasUrl: null,
+        }),
+    });
+    const worker = new CampaignWorker(f.database, f.config, resolver);
+    const step = await worker.step(NOW);
+    assert.equal(step.disposition, "stage_completed");
+    assert.equal(step.recordingId, rec.id);
+    assert.equal(step.state, "metadata_ready");
+    assert.equal(f.database.getProvenance(rec.id)?.streamerUrl, "https://live-a.example/990001/");
+});

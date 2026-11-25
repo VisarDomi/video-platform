@@ -121,6 +121,18 @@ export class CampaignWorker {
         return { disposition: "admitted", recordingId: recording.id, state: recording.state };
     }
 
+    // Recordings already in the ledger without a provenance row (for example, re-queued
+    // after a retired upload destination) bypass admit(); resolve them before local stages
+    // so described recordings do not stall in provenance_review_required.
+    private async ensureProvenance(recording: Recording, now: Date): Promise<void> {
+        if (this.database.getProvenance(recording.id)) return;
+        const resolution = await this.resolver.resolve(recording, now);
+        this.database.saveProvenance(
+            recording.id,
+            this.database.getProvenanceOverride(recording.provider, resolution.observedIdentifier) ?? resolution,
+        );
+    }
+
     // One prepared recording's upload: the last checks, the allowance, the upload and what
     // its outcome means for the campaign.
     private async uploadPrepared(uploadReady: Recording, control: CampaignControl, comparison: unknown, now: Date): Promise<CampaignStepResult> {
@@ -313,6 +325,7 @@ export class CampaignWorker {
                 return { disposition: "attention_required", recordingId: recording.id, reason: error instanceof Error ? error.message : String(error) };
             }
             try {
+                await this.ensureProvenance(recording, now);
                 const result = await this.orchestrator.processRecording(recording.id, now);
                 if (!result) throw new Error(`Could not claim campaign recording ${recording.id}`);
                 return { disposition: "stage_completed", recordingId: result.id, state: result.state };
@@ -448,6 +461,7 @@ export class CampaignWorker {
             }
             let result;
             try {
+                await this.ensureProvenance(local[0], now);
                 result = await this.orchestrator.processRecording(local[0].id, now);
             } catch (error) {
                 if (!(error instanceof StageDeferredError)) throw error;

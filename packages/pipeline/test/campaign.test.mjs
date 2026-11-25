@@ -592,3 +592,42 @@ test("a local stage waiting for a resource holds only its recording: a prepared 
     assert.equal(waiting.recordingId, older.id);
     assert.match(waiting.reason, /fstrim/);
 });
+
+test("already-discovered recordings missing provenance resolve on demand instead of entering provenance_review_required", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-missing-prov-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const finalizationPath = path.join(root, "finalization.sqlite");
+    const authority = new DatabaseSync(finalizationPath);
+    authority.exec("CREATE TABLE integrity_checkpoints (recording_path TEXT PRIMARY KEY, playlist_fingerprint TEXT NOT NULL, report_json TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT");
+    const sourcePath = await addFinalized(authority, path.join(root, "live-b", "edited"), "2026-01-23 150039 990001");
+    authority.close();
+    const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
+    t.after(() => database.close());
+    const inspection = await inspectFinalizedRecording(sourcePath, "live-b", "edited");
+    assert.equal(inspection.status, "finalized");
+    const recording = database.discover(inspection.recording);
+    database.transition(recording.id, "server_ready", "remuxed");
+    const sha256 = "b".repeat(64);
+    database.saveArtifact(recording.id, { path: path.join(root, recording.id + ".mp4"), sizeBytes: 1_000, sha256, validatedAt: "2026-08-12T08:00:00Z" });
+    database.saveDescription(recording.id, {
+        artifactSha256: sha256, promptVersion: "test-v1", fps: 2,
+        output: { title: "Fixture title", description: "Fixture description.", tags: [] },
+        evidencePath: path.join(root, "evidence.json"),
+    });
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v6: test fixture");
+    assert.equal(database.getProvenance(recording.id), null, "precondition: no provenance row (like retired-destination re-entry)");
+    database.setCampaignState("running");
+    const resolver = TargetCatalogResolver.load({
+        resolveIdentifier: async (provider, identifier) => ({
+            id: identifier, label: identifier, channelUrl: `https://${provider}.example/${identifier}/`, aliasUrl: null,
+        }),
+    });
+    const config = { ...pipelineConfig, comparisonTrialOnly: false, automaticShortsEnabled: false,
+        finalizationDatabasePath: finalizationPath, discoveryRoots: [] };
+    const worker = new CampaignWorker(database, config, resolver);
+    const step = await worker.step(new Date("2026-11-25T03:00:00Z"));
+    assert.equal(step.disposition, "stage_completed");
+    assert.equal(step.recordingId, recording.id);
+    assert.equal(step.state, "metadata_ready");
+    assert.equal(database.getProvenance(recording.id)?.status, "resolved");
+});
