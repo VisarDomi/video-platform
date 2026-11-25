@@ -14,9 +14,11 @@ export function videoEncoderArgs(encoder: VideoEncoder): string[] {
     }
     // NVENC's slowest, best preset with every quality tool it has: two passes at full
     // resolution, spatial and temporal adaptive quantization, look-ahead and B-frames used
-    // as references. Constant quality (vbr with no bitrate cap), like x264's CRF.
+    // as references. Constant quality, like x264's CRF: without a high ceiling of its own,
+    // NVENC's VBR caps the bitrate near 16 Mbit/s and every level under about 18 encodes
+    // the same.
     return ["-c:v", "h264_nvenc", "-preset", "p7", "-tune", "hq", "-profile:v", "high",
-        "-rc", "vbr", "-cq", String(encoder.cq), "-b:v", "0",
+        "-rc", "vbr", "-cq", String(encoder.cq), "-b:v", "0", "-maxrate", "250M", "-bufsize", "500M",
         "-multipass", "fullres", "-spatial-aq", "1", "-temporal-aq", "1", "-aq-strength", "8",
         "-rc-lookahead", "32", "-bf", "3", "-b_ref_mode", "middle", "-pix_fmt", "yuv420p"];
 }

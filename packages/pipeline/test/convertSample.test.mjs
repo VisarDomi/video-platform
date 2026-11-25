@@ -23,7 +23,7 @@ test("NVENC runs its best preset at constant quality, with the same filters and 
     const outside = (args) => args.filter((_, i) => i < args.indexOf("-c:v") || i >= args.indexOf("-fps_mode:v"));
     assert.deepEqual(outside(nvenc), outside(x264));
     const encoder = videoEncoderArgs({ kind: "nvenc", cq: 18 });
-    for (const [flag, value] of [["-c:v", "h264_nvenc"], ["-preset", "p7"], ["-rc", "vbr"], ["-cq", "18"], ["-b:v", "0"], ["-multipass", "fullres"]]) {
+    for (const [flag, value] of [["-c:v", "h264_nvenc"], ["-preset", "p7"], ["-rc", "vbr"], ["-cq", "18"], ["-b:v", "0"], ["-maxrate", "250M"], ["-multipass", "fullres"]]) {
         assert.equal(encoder[encoder.indexOf(flag) + 1], value, flag);
     }
     assert.equal(videoEncoderLabel({ kind: "nvenc", cq: 18 }), "nvenc-p7-cq18");
