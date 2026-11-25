@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { probeNativeStreamLayout, type NativeInputRun } from "./mediaCompatibility.js";
 import { productionVideoFilters } from "./videoFilters.js";
+import { PRODUCTION_VIDEO_ENCODER, videoEncoderArgs, type VideoEncoder } from "./videoEncoder.js";
 
 async function ffmpeg(args: string[]): Promise<void> {
     await new Promise<void>((resolve, reject) => {
@@ -22,7 +23,8 @@ async function ffmpeg(args: string[]): Promise<void> {
 // Missing audio becomes silence; existing A/V offsets are not independently
 // reset. Compatible conversions keep the existing copied-audio fast path.
 export async function convertIndependentNativeRuns(runs: readonly NativeInputRun[], output: string,
-    dimensions: { outputWidth: number; outputHeight: number; rotate?: boolean }): Promise<void> {
+    dimensions: { outputWidth: number; outputHeight: number; rotate?: boolean },
+    encoder: VideoEncoder = PRODUCTION_VIDEO_ENCODER): Promise<void> {
     const temporary = await fs.mkdtemp(path.join(path.dirname(output), ".native-conversion-"));
     try {
         const concat = ["ffconcat version 1.0"];
@@ -63,8 +65,8 @@ export async function convertIndependentNativeRuns(runs: readonly NativeInputRun
                 }
             }
             await ffmpeg([...inputs, "-filter_complex", filters.join(";"), "-map", "[v]",
-                ...(hasAudio ? ["-map", "[a]"] : []), "-c:v", "libx264", "-preset", "slow", "-crf", "16",
-                "-pix_fmt", "yuv420p", "-fps_mode:v", "vfr", "-enc_time_base:v", "1:90000",
+                ...(hasAudio ? ["-map", "[a]"] : []), ...videoEncoderArgs(encoder),
+                "-fps_mode:v", "vfr", "-enc_time_base:v", "1:90000",
                 ...(hasAudio ? ["-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2"] : []), "-f", "nut", part]);
             concat.push(`file '${part.replaceAll("'", "'\\''")}'`, `duration ${run.durationSeconds.toFixed(9)}`);
         }

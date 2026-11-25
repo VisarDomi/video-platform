@@ -9,6 +9,7 @@ import { preparePlaylistInput } from "./playlistInput.js";
 import { analyzeRecordingResolution, type RecordingResolutionAnalysis, type ShapeGroup } from "./resolutionPolicy.js";
 import { convertIndependentNativeRuns } from "./normalizeInputRuns.js";
 import { productionVideoFilters } from "./videoFilters.js";
+import { PRODUCTION_VIDEO_ENCODER, videoEncoderArgs, type VideoEncoder } from "./videoEncoder.js";
 
 export type UpscaleMode = ArtifactVariant;
 
@@ -256,6 +257,7 @@ export function buildUpscaleTranscodeArgs(
     temporaryOutput: string,
     plan: UpscalePlan,
     inputArgs: readonly string[] = ["-i", inputPath],
+    encoder: VideoEncoder = PRODUCTION_VIDEO_ENCODER,
 ): string[] {
     const filters = [];
     if (plan.selectExpression !== null) filters.push(`select='${plan.selectExpression}'`);
@@ -269,10 +271,7 @@ export function buildUpscaleTranscodeArgs(
         "-map", "0:v:0",
         "-map", "0:a?",
         "-vf", filters.join(","),
-        "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "16",
-        "-pix_fmt", "yuv420p",
+        ...videoEncoderArgs(encoder),
         "-fps_mode:v", "vfr",
         // Encoder defaults round PTS to the nominal frame interval. AAC
         // pre-roll often puts the video origin between those ticks.
@@ -338,6 +337,7 @@ async function runUpscaleTranscode(
     normalizePlaylist = false,
     analysis?: RecordingResolutionAnalysis,
     keepIndexes?: ReadonlySet<number>,
+    encoder: VideoEncoder = PRODUCTION_VIDEO_ENCODER,
 ): Promise<UpscaleTranscodeResult> {
     const { finalPath, temporaryPath } = await prepareAtomicRemuxPaths(
         stagingRoot,
@@ -356,9 +356,9 @@ async function runUpscaleTranscode(
         ? await preparePlaylistInput(inputPath, stagingRoot, geometry ? { analysis: geometry, keepIndexes } : undefined) : null;
     try {
         if (prepared?.incompatibility && prepared.runs) {
-            await convertIndependentNativeRuns(prepared.runs, temporaryPath, plan);
+            await convertIndependentNativeRuns(prepared.runs, temporaryPath, plan, encoder);
         } else await new Promise<void>((resolve, reject) => {
-            const child = spawn("ffmpeg", buildUpscaleTranscodeArgs(inputPath, temporaryPath, plan, prepared?.args), {
+            const child = spawn("ffmpeg", buildUpscaleTranscodeArgs(inputPath, temporaryPath, plan, prepared?.args, encoder), {
                 stdio: ["ignore", "ignore", "pipe"],
             });
             let stderr = "";
@@ -401,6 +401,7 @@ export async function convertShapeGroup(
     artifactSuffix: string,
     analysis?: RecordingResolutionAnalysis,
     keepIndexes?: ReadonlySet<number>,
+    encoder: VideoEncoder = PRODUCTION_VIDEO_ENCODER,
 ): Promise<UpscaleTranscodeResult> {
     const { width, height, rotate } = group.output;
     const plan: UpscalePlan = {
@@ -414,5 +415,5 @@ export async function convertShapeGroup(
         selectExpression: null,
         rotate,
     };
-    return await runUpscaleTranscode(inputPath, stagingRoot, recordingId, plan, artifactSuffix, true, analysis, keepIndexes);
+    return await runUpscaleTranscode(inputPath, stagingRoot, recordingId, plan, artifactSuffix, true, analysis, keepIndexes, encoder);
 }

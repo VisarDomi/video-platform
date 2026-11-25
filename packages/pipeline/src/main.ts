@@ -36,6 +36,8 @@ import { contentProfile, initContentProfile } from "./contentProfile.js";
 import { acceptBelowFullHd } from "./commands/acceptBelowFullHd.js";
 import { readFile } from "node:fs/promises";
 import { parseDestinations } from "sdk";
+import { convertSample } from "./commands/convertSample.js";
+import { PRODUCTION_VIDEO_ENCODER, type VideoEncoder } from "./stages/videoEncoder.js";
 
 function usage(): never {
     throw new Error([
@@ -45,6 +47,7 @@ function usage(): never {
         "  remux-one --recording PATH [--upscale1080p | --upscale1440p]",
         "  describe-one --recording ID",
         "  prepare-one --recording ID --apply   (the worker's own conversion and description; no upload)",
+        "  convert-sample --source DIR --out-dir DIR [--nvenc-cq N]   (production's conversion, or NVENC on the GPU; no ledger)",
         "  process-one --apply | provenance-refresh --apply | provenance-review",
         "  accept-below-full-hd --remote-id <id> [--remote-id <id> ...] [--apply]",
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
@@ -116,7 +119,7 @@ async function destinationCommand(command: string): Promise<((args: readonly str
 
 async function main(): Promise<void> {
     const command = process.argv[2];
-    if (!["status", "discover-plan", "discover", "remux-one", "describe-one", "process-one", "prepare-one", "provenance-refresh",
+    if (!["status", "discover-plan", "discover", "remux-one", "convert-sample", "describe-one", "process-one", "prepare-one", "provenance-refresh",
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
@@ -183,6 +186,16 @@ async function main(): Promise<void> {
             null,
             2,
         ));
+        return;
+    }
+    if (command === "convert-sample") {
+        const args = process.argv.slice(3);
+        const source = option(args, "--source");
+        const outDir = option(args, "--out-dir");
+        if (!source || !outDir) usage();
+        const cq = option(args, "--nvenc-cq");
+        const encoder: VideoEncoder = cq === null ? PRODUCTION_VIDEO_ENCODER : { kind: "nvenc", cq: Number(cq) };
+        console.log(JSON.stringify(await convertSample(source, outDir, encoder), null, 2));
         return;
     }
     if (command === "describe-one") {
