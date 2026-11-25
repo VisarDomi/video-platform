@@ -6,7 +6,7 @@ import { sourcesOf, type PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { CampaignProviderFilter } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
-import { CampaignWorker } from "../campaign/campaignWorker.js";
+import { CampaignWorker, type CampaignLane } from "../campaign/campaignWorker.js";
 import { uploadOne } from "./uploadOne.js";
 import type { AccountSlot } from "../campaign/accountSlot.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
@@ -233,6 +233,8 @@ export interface CampaignStepOptions {
     // free (another lane may have an upload in flight), and the home upload takes it.
     readonly slot?: AccountSlot;
     readonly uploadHold?: string | null;
+    // The worker's lane taking this step (see CampaignLane); none: a whole serial step.
+    readonly lane?: CampaignLane;
 }
 
 export async function campaignStep(config: PipelineConfig, options: CampaignStepOptions = {}): Promise<unknown> {
@@ -254,12 +256,14 @@ export async function campaignStep(config: PipelineConfig, options: CampaignStep
                 `Pipeline database is waiting for ${CURRENT_PRODUCTION_VERSION} rollover; run campaign-resume --apply`,
             );
         }
-        const interrupted = options.slot
+        // Upload recovery belongs to the step that uploads.
+        const uploads = !options.lane || options.lane === "upload";
+        const interrupted = !uploads ? [] : options.slot
             ? (await options.slot.ifFree("recovery", () => database.recoverInterruptedUploads()))?.value ?? []
             : database.recoverInterruptedUploads();
         const recovery = [...interrupted,
             // Never-submitted attempts published nothing: back in the queue now.
-            ...(await settleUnsubmitted(database)).map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" }))];
+            ...(uploads ? await settleUnsubmitted(database) : []).map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" }))];
         const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
         const worker = new CampaignWorker(
             database,

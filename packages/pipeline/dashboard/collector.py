@@ -172,23 +172,52 @@ def read_services(previous=None):
     return output, next_sample
 
 
+# A lane's own wait that the campaign card shows (conversion first, then description).
+LANE_WAITS = ("upload_quota_wait", "resource_wait", "full_ahead")
+
+
+def merge_worker_steps(events):
+    """The worker's current step from its campaign-step journal events, oldest first. With
+    lanes (the event's "lane"), each lane's latest step counts: a wait of the convert or the
+    describe lane is the campaign's, else the newest step; "uploads" is the upload lane's."""
+    latest = {}
+    for event in events:
+        step = (event.get("result") or {}).get("step") or {}
+        lane = event.get("lane") if event.get("lane") in ("convert", "describe", "upload") else None
+        latest[lane] = step
+    if not latest:
+        return None
+    if set(latest) == {None}:
+        step = latest[None]
+    else:
+        waiting = [latest[lane] for lane in ("convert", "describe") if (latest.get(lane) or {}).get("disposition") in LANE_WAITS]
+        step = waiting[0] if waiting else list(latest.values())[-1]
+    uploads = (latest.get("upload") or latest.get(None) or {}).get("uploads")
+    return {"disposition": step.get("disposition"), "reason": safe_reason(step.get("reason")),
+            "uploads": uploads if isinstance(uploads, str) else None,
+            "lanes": {lane: (latest[lane] or {}).get("disposition") for lane in latest if lane}}
+
+
 def latest_worker_step():
     supervised = supervised_report()
     if supervised is not None:
         return supervised["worker_step"]
     try:
-        result = subprocess.run(["journalctl", "--user", "-u", "video-pipeline", "-n", "30", "-o", "json", "--no-pager"],
+        # Each lane logs a step only when it changes: read far enough back to see all three.
+        result = subprocess.run(["journalctl", "--user", "-u", "video-pipeline", "-n", "400", "-o", "json",
+                                 "--output-fields=MESSAGE", "--no-pager"],
                                 capture_output=True, text=True, timeout=2, check=True)
-        if len(result.stdout) > 300_000:
+        if len(result.stdout) > 2_000_000:
             return None
-        for line in reversed(result.stdout.splitlines()):
+        events = []
+        for line in result.stdout.splitlines():
             try:
                 event = json.loads(json.loads(line).get("MESSAGE", ""))
-                if event.get("event") == "campaign-step":
-                    step = event.get("result", {}).get("step", {})
-                    return {"disposition": step.get("disposition"), "reason": safe_reason(step.get("reason"))}
-            except (ValueError, AttributeError):
+                if isinstance(event, dict) and event.get("event") == "campaign-step":
+                    events.append(event)
+            except (ValueError, AttributeError, TypeError):
                 pass
+        return merge_worker_steps(events)
     except (OSError, subprocess.SubprocessError):
         pass
     return None

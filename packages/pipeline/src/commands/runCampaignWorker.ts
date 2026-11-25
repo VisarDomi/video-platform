@@ -16,6 +16,8 @@ import { access } from "node:fs/promises";
 import { AccountSlot } from "../campaign/accountSlot.js";
 import { runCarrierLane } from "../uplink/carrierLane.js";
 import { runOfficeLane } from "../uplink/officeLane.js";
+import type { CampaignLane } from "../campaign/campaignWorker.js";
+import { keepDescriptionModelLoaded } from "../stages/descriptionModel.js";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
 // Well inside common PHP session idle limits; one light request each time.
@@ -79,12 +81,27 @@ export async function keepDestinationSessionAlive(config: PipelineConfig, now = 
     }
 }
 
-function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
+// Lanes waiting for work, woken when another lane finished a stage (the recording it handed
+// on may be the waiting lane's next).
+export class LaneWakeup {
+    private readonly waiting = new Set<() => void>();
+    notify(): void {
+        for (const wake of [...this.waiting]) wake();
+    }
+    add(wake: () => void): () => void {
+        this.waiting.add(wake);
+        return () => this.waiting.delete(wake);
+    }
+}
+
+function wait(milliseconds: number, signal: AbortSignal, wakeup?: LaneWakeup): Promise<void> {
     return new Promise((resolve) => {
         if (signal.aborted) return resolve();
         const timer = setTimeout(done, milliseconds);
+        const remove = wakeup?.add(done);
         function done() {
             clearTimeout(timer);
+            remove?.();
             signal.removeEventListener("abort", done);
             resolve();
         }
@@ -210,14 +227,13 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         })();
     }, 30_000);
     signal.addEventListener("abort", () => clearInterval(selectionWatch), { once: true });
-    // A waiting step (paused, idle, a cooldown) repeats every 30 seconds and a
-    // pending verification is rechecked until it settles: each is logged when it
-    // changes, not on every repetition.
+    // A waiting step (paused, idle, a cooldown) repeats every 30 seconds (sooner when another
+    // lane hands on work) and a pending verification is rechecked until it settles: each is
+    // logged when it changes, not on every repetition.
     // The carrier lane runs beside the main loop (the drive copies while conversion runs).
     const carrierLane = config.uplink ? runCarrierLane(config, signal, (_notice, title, body) => notifyDesktop(title, body))
         .catch((error: unknown) => console.error(journalPriority("error", 2) + JSON.stringify({ event: "carrier-lane-error", error: String(error) })))
         : Promise.resolve();
-    let lastStep = "";
     let verificationHold: string | null = null;
     // The office lane uploads from the other uplink beside the main loop, sharing the slot.
     const officeLane = config.uplink ? runOfficeLane(config, signal, slot, (_notice, title, body) => notifyDesktop(title, body, true),
@@ -225,70 +241,83 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         .catch((error: unknown) => console.error(journalPriority("error", 2) + JSON.stringify({ event: "office-lane-error", error: String(error) })))
         : Promise.resolve();
     const reconcileOutcomes = new Map<string, string>();
-    let waitingForRecovery = false;
-    while (!signal.aborted) {
-        try {
-            if (await recoveryInProgress(config.databasePath, activeDestination(config))) {
-                waitingForRecovery = true;
-                await wait(1_000, signal);
-                continue;
-            }
-            if (waitingForRecovery) {
-                waitingForRecovery = false;
-                await keepDestinationSessionAlive(config);
-            }
-            if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
-                const release = await slot.take("verification", signal);
-                try {
-                    const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string; reason?: string }> };
-                    const changed = (reconciled.results ?? []).filter((item) => {
-                        const outcome = `${item.disposition}\u0000${item.reason ?? ""}`;
-                        if (reconcileOutcomes.get(item.recordingId ?? "") === outcome) return false;
-                        reconcileOutcomes.set(item.recordingId ?? "", outcome);
-                        return true;
-                    });
-                    if (changed.length > 0) console.log(JSON.stringify({ event: "campaign-reconcile", result: { ...reconciled, results: changed } }));
-                    verificationHold = null;
-                } catch (error) {
-                    // Without a second uplink a failed verification stops the step (and the
-                    // conversions with it); with one, it holds uploads only.
-                    if (!config.uplink) throw error;
-                    const message = error instanceof Error ? error.message : String(error);
-                    if (verificationHold === null) console.error(journalPriority("warn") + JSON.stringify({ event: "campaign-reconcile-error", error: message }));
-                    verificationHold = `the daily verification failed: ${message}`;
-                } finally { release(); }
-            }
-            const result = await campaignStep(config, { slot, uploadHold: verificationHold }) as {
-                step?: { disposition?: string; resumeAt?: string };
-            };
-            const step = JSON.stringify(result);
-            if (step !== lastStep) console.log(JSON.stringify({ event: "campaign-step", result }));
-            lastStep = step;
-            const notice = stepNotification(result.step as Parameters<typeof stepNotification>[0]);
-            if (notice) notifyDesktop(notice.title, notice.body, notice.urgent);
-            const disposition = result.step?.disposition;
-            if ((disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown" || disposition === "upload_retry_cooldown")
-                && result.step?.resumeAt && !config.uplink) {
-                const resumeAt = Date.parse(result.step.resumeAt);
-                if (Number.isFinite(resumeAt)) {
-                    // Keep verification and queue watching alive during an
-                    // upload cooldown; durable campaign state gates uploads.
-                    await wait(Math.min(IDLE_POLL_MILLISECONDS, Math.max(0, resumeAt - Date.now())), signal);
+    const wakeup = new LaneWakeup();
+    // With a second uplink, conversion, description and upload each run in their own lane,
+    // on their own recording, at the same time; the model stays loaded between descriptions
+    // (unloaded by a manual pause). Without one, one serial loop takes whichever step is due.
+    const model = config.uplink ? keepDescriptionModelLoaded() : null;
+    const lane = async (name: CampaignLane | undefined): Promise<void> => {
+        let lastStep = "";
+        let waitingForRecovery = false;
+        const uploads = name === undefined || name === "upload";
+        while (!signal.aborted) {
+            try {
+                if (uploads && await recoveryInProgress(config.databasePath, activeDestination(config))) {
+                    waitingForRecovery = true;
+                    await wait(1_000, signal);
                     continue;
                 }
+                if (waitingForRecovery) {
+                    waitingForRecovery = false;
+                    await keepDestinationSessionAlive(config);
+                }
+                if (uploads && config.networkUploadsEnabled && confirmationsAreDue(config)) {
+                    const release = await slot.take("verification", signal);
+                    try {
+                        const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string; reason?: string }> };
+                        const changed = (reconciled.results ?? []).filter((item) => {
+                            const outcome = `${item.disposition}\u0000${item.reason ?? ""}`;
+                            if (reconcileOutcomes.get(item.recordingId ?? "") === outcome) return false;
+                            reconcileOutcomes.set(item.recordingId ?? "", outcome);
+                            return true;
+                        });
+                        if (changed.length > 0) console.log(JSON.stringify({ event: "campaign-reconcile", result: { ...reconciled, results: changed } }));
+                        verificationHold = null;
+                    } catch (error) {
+                        // Without a second uplink a failed verification stops the step (and the
+                        // conversions with it); with one, it holds uploads only.
+                        if (!config.uplink) throw error;
+                        const message = error instanceof Error ? error.message : String(error);
+                        if (verificationHold === null) console.error(journalPriority("warn") + JSON.stringify({ event: "campaign-reconcile-error", error: message }));
+                        verificationHold = `the daily verification failed: ${message}`;
+                    } finally { release(); }
+                }
+                const result = await campaignStep(config, { slot, uploadHold: verificationHold, ...(name ? { lane: name } : {}) }) as {
+                    step?: { disposition?: string; resumeAt?: string };
+                };
+                const step = JSON.stringify(result);
+                if (step !== lastStep) console.log(JSON.stringify({ event: "campaign-step", ...(name ? { lane: name } : {}), result }));
+                lastStep = step;
+                const notice = stepNotification(result.step as Parameters<typeof stepNotification>[0]);
+                if (notice) notifyDesktop(notice.title, notice.body, notice.urgent);
+                const disposition = result.step?.disposition;
+                // A manual pause frees the GPU and the memory the model holds.
+                if (name === "describe" && disposition === "paused" && model?.loaded) await model.unload();
+                if ((disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown" || disposition === "upload_retry_cooldown")
+                    && result.step?.resumeAt && !config.uplink) {
+                    const resumeAt = Date.parse(result.step.resumeAt);
+                    if (Number.isFinite(resumeAt)) {
+                        // Keep verification and queue watching alive during an
+                        // upload cooldown; durable campaign state gates uploads.
+                        await wait(Math.min(IDLE_POLL_MILLISECONDS, Math.max(0, resumeAt - Date.now())), signal);
+                        continue;
+                    }
+                }
+                if (disposition === "admitted" || disposition === "stage_completed"
+                    || disposition === "upload_completed" || disposition === "shorts_joined" || disposition === "shorts_waiting") {
+                    wakeup.notify();
+                    continue;
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error(journalPriority("error", 2) + JSON.stringify({ event: "campaign-error", ...(name ? { lane: name } : {}), error: message }));
+                notifyDesktop("Pipeline error", message, true);
             }
-            if (disposition === "admitted" || disposition === "stage_completed"
-                || disposition === "upload_completed" || disposition === "shorts_joined" || disposition === "shorts_waiting") continue;
-            // Converting ahead: a held upload never holds the next conversion.
-            if (config.uplink && (disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown"
-                || disposition === "upload_retry_cooldown" || disposition === "metadata_rejected")) continue;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.error(journalPriority("error", 2) + JSON.stringify({ event: "campaign-error", error: message }));
-            notifyDesktop("Pipeline error", message, true);
+            await wait(IDLE_POLL_MILLISECONDS, signal, wakeup);
         }
-        await wait(IDLE_POLL_MILLISECONDS, signal);
-    }
+    };
+    await Promise.all(config.uplink ? [lane("convert"), lane("describe"), lane("upload")] : [lane(undefined)]);
+    await model?.unload();
     // A copy in progress ends at its next step (a killed one leaves only a .partial file,
     // which the next pass deletes).
     await Promise.all([carrierLane, officeLane]);

@@ -40,7 +40,9 @@ each one is tested. Every claim names the code or the command that holds it.
    through a state machine in a SQLite ledger: provenance (the channel's pages, from the
    server), conversion, description (a local vision model with the content profile's
    prompt), joining short pieces, upload, and verification a day later. Its campaign
-   worker takes one step at a time, under a daily byte allowance per network. It deletes an original
+   worker runs, under a daily byte allowance per network, either one step at a time or (with
+   a second uplink) three lanes at once: conversion on the CPU, description on the GPU and
+   upload on the network, each taking the oldest recording waiting for its stage. It deletes an original
    only when every upload covering it has been verified online, and keeps the receipts.
 6. **The destination plug-in** speaks the upload site's protocol: sign in, transfer, create
    the video, list the account's uploads, and probe one. The core owns everything that

@@ -107,3 +107,20 @@ process.on('SIGTERM',()=>{server.closeAllConnections();server.close(()=>process.
     assert.match(progress.lastLogLine, /loading tensors/);
     assert('ioPressureSomeAvg10' in progress);
 });
+test('a server kept loaded starts once, is reused, and starts again after it died', async t=>{
+    const {llama,config}=await fixture(t,'ready');
+    assert.equal(llama.running,false);
+    await llama.ensureStarted();
+    assert.equal(llama.running,true);
+    const first=llama.child.pid;
+    await llama.ensureStarted();
+    assert.equal(llama.child.pid,first,'the running server is reused');
+    llama.child.kill('SIGKILL');
+    await new Promise(resolve=>llama.child.once('exit',resolve));
+    assert.equal(llama.running,false);
+    await llama.ensureStarted();
+    assert.notEqual(llama.child.pid,first);
+    assert.equal((await fetch(`${config.modelUrl}/health`)).status,200);
+    await llama.stop();
+    assert.equal(llama.running,false);
+});

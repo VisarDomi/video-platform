@@ -1,8 +1,9 @@
 import { readdir, readFile } from "node:fs/promises";
-import { describeArtifact, DescriptorStartupError } from "descriptor";
+import { describeArtifact, DescriptorStartupError, type LlamaServer } from "descriptor";
 import type { ArtifactRecord } from "../domain/types.js";
 import { StageDeferredError, type DescriptionEvidence } from "../scheduler/orchestrator.js";
 import { isCounterclockwiseArtifact } from "./artifactNaming.js";
+import { keptDescriptionModel } from "./descriptionModel.js";
 
 // The descriptor's llama-server holds about 11 GB of RAM while describing; on a
 // machine short of memory the kernel kills it and the stage would fail.
@@ -51,21 +52,26 @@ export async function describeValidatedArtifact(
     // A portrait picture was turned counterclockwise for upload; the model
     // reads it lying on its side, so it is shown the picture turned back.
     let result;
+    const kept = keptDescriptionModel();
+    const describe = (server?: LlamaServer) => describeArtifact(artifact.path, {
+        evidenceKey: artifact.sha256,
+        avoidPhrases,
+        ...(server ? { server, keepServer: true } : {}),
+        // Only a description that is not cached starts the model server (a kept one that is
+        // already loaded needs nothing more).
+        beforeWork: async () => {
+            if (server?.running) return;
+            const available = await availableMemoryBytes();
+            if (available !== null && available < DESCRIBE_MIN_AVAILABLE_GIB * 2 ** 30) {
+                // A stable message: the campaign logs a waiting step only when it changes.
+                throw new StageDeferredError(`waiting for ${DESCRIBE_MIN_AVAILABLE_GIB} GiB of available memory before starting the descriptor`);
+            }
+            if (await diskTrimRunning()) throw new StageDeferredError("waiting for fstrim to finish trimming the disk before starting the descriptor");
+        },
+        ...(isCounterclockwiseArtifact(artifact.path) ? { rotation: "clockwise" as const } : {}),
+    });
     try {
-        result = await describeArtifact(artifact.path, {
-            evidenceKey: artifact.sha256,
-            avoidPhrases,
-            // Only a description that is not cached starts the model server.
-            beforeWork: async () => {
-                const available = await availableMemoryBytes();
-                if (available !== null && available < DESCRIBE_MIN_AVAILABLE_GIB * 2 ** 30) {
-                    // A stable message: the campaign logs a waiting step only when it changes.
-                    throw new StageDeferredError(`waiting for ${DESCRIBE_MIN_AVAILABLE_GIB} GiB of available memory before starting the descriptor`);
-                }
-                if (await diskTrimRunning()) throw new StageDeferredError("waiting for fstrim to finish trimming the disk before starting the descriptor");
-            },
-            ...(isCounterclockwiseArtifact(artifact.path) ? { rotation: "clockwise" as const } : {}),
-        });
+        result = await (kept ? kept.use((server) => describe(server)) : describe());
     } catch (error) {
         if (!(error instanceof DescriptorStartupError)) throw error;
         // The model did not start: a matter of the machine at that moment, not of this video.

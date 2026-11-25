@@ -228,3 +228,80 @@ test("ahead mode resolves missing provenance on already-discovered recordings be
     assert.equal(step.state, "metadata_ready");
     assert.equal(f.database.getProvenance(rec.id)?.streamerUrl, "https://live-a.example/990001/");
 });
+
+// The worker's lanes: conversion, description and upload each take the oldest recording
+// waiting for their own stage, so three recordings move at once.
+function laneWorker(f, lane, extra = {}) {
+    const worker = f.make({ lane, ...extra });
+    worker.orchestrator.processRecording = async (id) => {
+        const recording = f.database.get(id);
+        if (recording.state === "server_ready") {
+            f.conversions.push(id);
+            f.database.transition(id, "server_ready", "remuxed");
+            f.database.saveArtifact(id, { path: path.join(f.root, `${id}.mp4`), sizeBytes: GB,
+                sha256: createHash("sha256").update(id).digest("hex"), validatedAt: NOW.toISOString() });
+            f.database.recordResolutionPolicyAssessment(id, "resolution-policy-v6: test fixture");
+        } else if (recording.state === "artifact_valid") {
+            f.descriptions.push(id);
+            f.database.saveDescription(id, { artifactSha256: createHash("sha256").update(id).digest("hex"), promptVersion: "test-v1", fps: 2,
+                output: { title: "Title", description: "Description.", tags: ["room"] }, evidencePath: path.join(f.root, "evidence.json") });
+        } else if (recording.state === "described") {
+            f.database.saveProvenance(id, { observedIdentifier: "alias", status: "resolved", streamerId: "streamer-id", alias: "alias",
+                streamerUrl: "https://live-a.example/streamer-id", aliasUrl: null, reason: null, updatedAt: NOW.toISOString() });
+            f.database.saveUploadMetadata(id, { title: "Title [alias]", description: "Description.", tags: ["live-a"] });
+        } else throw new Error(`lane ${lane} was given ${recording.state}`);
+        return f.database.get(id);
+    };
+    return worker;
+}
+
+async function laneFixture(t, options) {
+    const f = await fixture(t, options);
+    f.descriptions = [];
+    return f;
+}
+
+test("each lane takes only its own stage, oldest first: three recordings move at the same time", async (t) => {
+    const f = await laneFixture(t, { ready: [["2026-01-01 010000 a", 1 * GB]], local: ["2026-01-02 010000 b", "2026-01-03 010000 c"] });
+    const b = f.recordings["2026-01-02 010000 b"].id, c = f.recordings["2026-01-03 010000 c"].id;
+    // b is converted: it waits for its description.
+    await laneWorker(f, "convert").step(NOW);
+    assert.equal(f.database.get(b).state, "artifact_valid");
+    const [convert, describe, upload] = await Promise.all([
+        laneWorker(f, "convert").step(NOW), laneWorker(f, "describe").step(NOW), laneWorker(f, "upload").step(NOW)]);
+    assert.deepEqual([convert.disposition, convert.recordingId], ["stage_completed", c]);
+    assert.deepEqual([describe.disposition, describe.recordingId], ["stage_completed", b]);
+    assert.equal(upload.disposition, "upload_completed");
+    assert.deepEqual(f.uploads, [f.recordings["2026-01-01 010000 a"].id]);
+    assert.deepEqual([f.conversions, f.descriptions], [[b, c], [b]]);
+    // Nothing for a lane: it waits, it never takes another lane's stage.
+    assert.equal((await laneWorker(f, "upload").step(NOW)).uploads, "nothing ready");
+    // b's metadata is composed (the oldest first), then c is described.
+    assert.deepEqual(await laneWorker(f, "describe").step(NOW), { disposition: "stage_completed", recordingId: b, state: "metadata_ready" });
+    assert.equal((await laneWorker(f, "describe").step(NOW)).recordingId, c);
+    assert.deepEqual(f.descriptions, [b, c]);
+    assert.equal((await laneWorker(f, "upload").step(NOW)).disposition, "upload_completed", "b goes up next");
+});
+
+test("an upload hold stops only the upload lane; a manual pause stops every lane", async (t) => {
+    const f = await laneFixture(t, { ready: [["2026-01-01 010000 a", 1 * GB]], local: ["2026-01-02 010000 b"] });
+    f.database.pauseForAttention("Destination shared session is logged out; restore it", NOW);
+    const held = await laneWorker(f, "upload").step(NOW);
+    assert.deepEqual([held.disposition, held.uploads], ["idle", "held: Destination shared session is logged out; restore it"]);
+    assert.equal((await laneWorker(f, "convert").step(NOW)).disposition, "stage_completed");
+    assert.equal((await laneWorker(f, "describe").step(NOW)).disposition, "stage_completed");
+    assert.deepEqual(f.uploads, []);
+    f.database.setCampaignState("paused", NOW);
+    for (const lane of ["convert", "describe", "upload"]) assert.equal((await laneWorker(f, lane).step(NOW)).disposition, "paused", lane);
+});
+
+test("only the convert lane admits new recordings, up to the cap", async (t) => {
+    const f = await laneFixture(t, { ready: [["2026-01-01 010000 a", 61 * GB]], unadmitted: ["2026-01-05 010000 new"], capacityBytes: 10 * GB });
+    f.spend(50 * GB);
+    assert.equal((await laneWorker(f, "describe").step(NOW)).disposition, "idle");
+    const full = await laneWorker(f, "convert").step(NOW);
+    assert.deepEqual([full.disposition, full.uploads], ["full_ahead", "in the upload lane"]);
+    const g = await laneFixture(t, { unadmitted: ["2026-01-05 010000 new"] });
+    assert.equal((await laneWorker(g, "convert").step(NOW)).disposition, "admitted");
+    assert.equal((await laneWorker(g, "describe").step(NOW)).disposition, "idle");
+});

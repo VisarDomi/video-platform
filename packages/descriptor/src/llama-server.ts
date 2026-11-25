@@ -41,6 +41,19 @@ export class LlamaServer {
         }
     }
 
+    // Whether this instance's own server process is up (an external server is never ours).
+    get running(): boolean {
+        return this.child !== null && this.child.exitCode === null && this.child.signalCode === null;
+    }
+
+    // Starts the server unless this instance's process is already up: a server kept loaded
+    // between descriptions. One that died meanwhile is started again.
+    async ensureStarted(): Promise<void> {
+        if (this.running) return;
+        if (this.child) await this.stopChild();
+        await this.start();
+    }
+
     async start(): Promise<void> {
         if (this.child) throw new Error("llama-server is already managed by this instance");
         this.stopping = false;

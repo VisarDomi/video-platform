@@ -11,7 +11,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from collector import snapshot, upload_budget, transfer_progress
+from collector import snapshot, upload_budget, transfer_progress, merge_worker_steps
 from babysit_health import acknowledge_current_removals
 from server import Snapshot, allowed_client, create_server
 
@@ -342,3 +342,30 @@ class DashboardHTTPTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class WorkerStepTests(unittest.TestCase):
+    def step(self, disposition, lane=None, **extra):
+        event = {"event": "campaign-step", "result": {"step": {"disposition": disposition, **extra}}}
+        if lane:
+            event["lane"] = lane
+        return event
+
+    def test_one_serial_loop_is_its_newest_step(self):
+        merged = merge_worker_steps([self.step("idle", uploads="nothing ready"), self.step("stage_completed")])
+        self.assertEqual((merged["disposition"], merged["uploads"], merged["lanes"]), ("stage_completed", None, {}))
+        self.assertIsNone(merge_worker_steps([]))
+
+    def test_lanes_show_a_conversion_wait_and_the_upload_lanes_hold(self):
+        merged = merge_worker_steps([
+            self.step("full_ahead", "convert", uploads="in the upload lane"),
+            self.step("stage_completed", "describe"),
+            self.step("idle", "upload", uploads="held: the daily verification failed: x"),
+        ])
+        self.assertEqual(merged["disposition"], "full_ahead")
+        self.assertEqual(merged["uploads"], "held: the daily verification failed: x")
+        self.assertEqual(merged["lanes"], {"convert": "full_ahead", "describe": "stage_completed", "upload": "idle"})
+
+    def test_lanes_without_a_wait_show_the_newest_step(self):
+        merged = merge_worker_steps([self.step("stage_completed", "convert"), self.step("upload_completed", "upload")])
+        self.assertEqual(merged["disposition"], "upload_completed")

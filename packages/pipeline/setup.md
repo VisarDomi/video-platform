@@ -203,7 +203,9 @@ before the new artifact is produced. This does not rewrite published copies,
 alter remote ledger evidence, or enable automatic cleanup.
 
 A description that is not cached starts the descriptor's llama-server, which holds
-about 11 GB of RAM. The describe stage first waits until the machine has
+about 11 GB of RAM. The worker with three lanes (below) keeps it loaded between
+descriptions, and the upload's phrase rewrite uses the same server, one request at a
+time; a manual pause or a stop unloads it. The describe stage first waits until the machine has
 `VIDEO_PIPELINE_DESCRIBE_MIN_MEMORY_GIB` (default 16) GiB available: until then the
 campaign step is `resource_wait`, retried every 30 seconds, and the recording
 keeps its state. Started on a machine short of memory, the server is killed by
@@ -345,6 +347,17 @@ sends desktop notifications for attention pauses, cooldowns, rejected words,
 removed videos and errors (`VIDEO_PIPELINE_NOTIFY=0` disables them). Control it
 with `systemctl --user start|stop|restart video-pipeline` and the campaign
 intent with `campaign:resume` / `campaign:pause`.
+
+With the sites file's `uplink` section the worker runs three lanes at once, each on its own
+resource and its own recording: conversion and validation (`server_ready`, `remuxed`; the
+CPU; the only lane that admits new recordings, up to the ahead cap), description and
+metadata (`artifact_valid`, `described`; the GPU), and home upload with the daily
+verification (`metadata_ready`; the network, holding the account slot). Each takes the
+oldest recording waiting for its stage, so one recording follows the next through the
+three. A lane that finishes a stage wakes the others; an idle one looks again every 30
+seconds. An upload hold (a cooldown, a lost session, a failed verification) stops only the
+upload lane; a manual pause stops all three. Its journal lines carry the lane
+(`"lane":"convert"`). Without the section one loop takes whichever step is due.
 
 A stop sends SIGTERM to the whole unit, so a running stage's ffmpeg or
 llama-server dies with the worker. A stage that fails while the worker is stopping

@@ -48,11 +48,23 @@ export interface AheadRoom {
     readonly admits: boolean;
 }
 
+// The worker's three lanes, each on its own resource and its own recording at a time:
+// conversion (the CPU), description (the GPU), upload (the network). Each takes the oldest
+// recording waiting for it, so one recording follows the next through the three.
+export type CampaignLane = "convert" | "describe" | "upload";
+const LANE_STATES: Readonly<Record<Exclude<CampaignLane, "upload">, readonly string[]>> = {
+    convert: ["server_ready", "remuxed"],
+    describe: ["artifact_valid", "described"],
+};
+const LOCAL_STATES = ["server_ready", "remuxed", "artifact_valid", "described"];
+
 export interface CampaignWorkerOptions {
     // The account slot the worker's lanes share (none: this process is the only uploader).
     readonly slot?: AccountSlot;
     // Uploads are held for a reason outside the campaign row (the daily verification failed).
     readonly uploadHold?: string | null;
+    // The lane this step belongs to (none: one step of whichever stage is due, in turn).
+    readonly lane?: CampaignLane;
 }
 
 // Campaign order: edited recordings of the filter's sites, oldest capture first.
@@ -82,7 +94,7 @@ export class CampaignWorker {
         this.orchestrator = new PipelineOrchestrator(
             database,
             createDefaultStages(config.stagingRoot, config),
-            workerId,
+            options.lane ? `${workerId}-${options.lane}` : workerId,
         );
     }
 
@@ -293,43 +305,39 @@ export class CampaignWorker {
             admits: readyBytes < limitBytes && freeBytes > uplink.minFreeBytes };
     }
 
-    // One step when conversion runs ahead: a home upload when one can go (no hold, the account
-    // slot free, home's allowance), else the oldest local stage, else a new recording while
-    // the cap and the disk allow. Files on a carrier belong to the other uplink.
-    private async stepAhead(control: CampaignControl, reviewRequired: number, hold: string | null, now: Date): Promise<CampaignStepResult> {
-        if (this.config.automaticShortsEnabled) {
-            const shorts = await maintainAutomaticShorts(this.database, this.config, this.resolver, now);
-            if (shorts.joined.length || shorts.registered) return {
-                disposition: shorts.joined.length ? "shorts_joined" : "shorts_waiting", ...shorts,
-            };
-        }
-        const allows = (recording: Recording) => this.database.campaignTrialAllows(recording.provider, recording.id);
-        const order = (recordings: readonly Recording[]) => ordered(recordings.filter((recording) =>
-            allows(recording) && !this.database.localSourceIsAbsent(recording.id)), control.providerFilter);
-        let uploads: string = hold ? `held: ${hold}` : this.upload ? "nothing ready" : "network uploads off";
-        if (!hold && this.upload) {
-            const uploadReady = order(this.database.list("metadata_ready").filter((recording) =>
-                this.database.canAttemptUpload(recording.id, now) && !this.database.carrierCopy(recording.id)))[0];
-            const artifact = uploadReady ? this.database.getArtifact(uploadReady.id) : null;
-            if (uploadReady && artifact && !this.database.canReserve(artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES,
-                now, this.config.uploadTimeZone, control.dailyUploadLimitBytes)) {
-                uploads = "waiting for home's allowance";
-            } else if (uploadReady) {
-                const release = this.options.slot ? this.options.slot.tryTake("home-upload") : () => undefined;
-                if (!release) uploads = `account busy (${this.options.slot?.heldBy})`;
-                else {
-                    try {
-                        const result = await this.uploadPrepared(uploadReady, control, null, now);
-                        if (result.disposition !== "upload_quota_wait" && result.disposition !== "awaiting_upload_activation") return result;
-                        uploads = result.disposition === "upload_quota_wait" ? "waiting for home's allowance" : "network uploads off";
-                    } finally { release(); }
-                }
-            }
-        }
+    // A home upload when one can go (no hold, the account slot free, home's allowance): its
+    // outcome, or why none went. Files on a carrier belong to the other uplink.
+    private async uploadAhead(control: CampaignControl, hold: string | null, now: Date): Promise<CampaignStepResult | string> {
+        if (hold) return `held: ${hold}`;
+        if (!this.upload) return "network uploads off";
+        const uploadReady = this.order(control, this.database.list("metadata_ready").filter((recording) =>
+            this.database.canAttemptUpload(recording.id, now) && !this.database.carrierCopy(recording.id)))[0];
+        if (!uploadReady) return "nothing ready";
+        const artifact = this.database.getArtifact(uploadReady.id);
+        if (artifact && !this.database.canReserve(artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES,
+            now, this.config.uploadTimeZone, control.dailyUploadLimitBytes)) return "waiting for home's allowance";
+        const release = this.options.slot ? this.options.slot.tryTake("home-upload") : () => undefined;
+        if (!release) return `account busy (${this.options.slot?.heldBy})`;
+        try {
+            const result = await this.uploadPrepared(uploadReady, control, null, now);
+            if (result.disposition === "upload_quota_wait") return "waiting for home's allowance";
+            if (result.disposition === "awaiting_upload_activation") return "network uploads off";
+            return result;
+        } finally { release(); }
+    }
+
+    private order(control: CampaignControl, recordings: readonly Recording[]): Recording[] {
+        return ordered(recordings.filter((recording) => this.database.campaignTrialAllows(recording.provider, recording.id)
+            && !this.database.localSourceIsAbsent(recording.id)), control.providerFilter);
+    }
+
+    // The oldest local stage among these states, or (admitting) a new recording that is older
+    // still, while the cap and the disk allow one. Null when there is neither.
+    private async localAhead(control: CampaignControl, states: readonly string[], admitting: boolean, room: AheadRoom | null,
+        now: Date): Promise<CampaignStepResult | null> {
         const key = (recording: RecordingInput) => `${captureKeyFromFolderName(path.basename(recording.sourcePath))}|${recording.provider}|${recording.sourcePath}`;
-        const local = order(this.database.list().filter((recording) => ["server_ready", "remuxed", "artifact_valid", "described"].includes(recording.state)));
-        const room = await this.aheadRoom(control);
-        const candidate = room.admits ? await selectOldestFinalizedEditedCandidate({
+        const local = this.order(control, this.database.list().filter((recording) => states.includes(recording.state)));
+        const candidate = admitting && room?.admits ? await selectOldestFinalizedEditedCandidate({
             finalizationDatabasePath: this.config.finalizationDatabasePath,
             roots: this.config.discoveryRoots,
             providerFilter: control.providerFilter,
@@ -338,37 +346,68 @@ export class CampaignWorker {
         }) : null;
         // An older source goes before newer local work (joined shorts batches never jump ahead).
         if (candidate && (!local[0] || key(candidate).localeCompare(key(local[0])) < 0)) return this.admit(candidate, now);
-        if (local[0]) {
-            const recording = local[0];
-            try {
-                await verifyCurrentServerAuthority(recording, this.config, this.database);
-                const resolutionResult = await this.enforceCurrentResolutionPolicy(recording, now);
-                if (resolutionResult) return resolutionResult;
-            } catch (error) {
-                if (await cancelInvalidShortBatch(this.database, this.config, recording.id, String(error), now)) {
-                    return { disposition: "stage_completed", recordingId: recording.id, state: "short_cancelled" };
-                }
-                return { disposition: "attention_required", recordingId: recording.id, reason: error instanceof Error ? error.message : String(error) };
+        const recording = local[0];
+        if (!recording) return null;
+        try {
+            await verifyCurrentServerAuthority(recording, this.config, this.database);
+            const resolutionResult = await this.enforceCurrentResolutionPolicy(recording, now);
+            if (resolutionResult) return resolutionResult;
+        } catch (error) {
+            if (await cancelInvalidShortBatch(this.database, this.config, recording.id, String(error), now)) {
+                return { disposition: "stage_completed", recordingId: recording.id, state: "short_cancelled" };
             }
-            try {
-                await this.ensureProvenance(recording, now);
-                const result = await this.orchestrator.processRecording(recording.id, now);
-                if (!result) throw new Error(`Could not claim campaign recording ${recording.id}`);
-                return { disposition: "stage_completed", recordingId: result.id, state: result.state };
-            } catch (error) {
-                if (!(error instanceof StageDeferredError)) throw error;
-                return { disposition: "resource_wait", recordingId: recording.id, reason: error.message };
-            }
+            return { disposition: "attention_required", recordingId: recording.id, reason: error instanceof Error ? error.message : String(error) };
         }
+        try {
+            await this.ensureProvenance(recording, now);
+            const result = await this.orchestrator.processRecording(recording.id, now);
+            if (!result) throw new Error(`Could not claim campaign recording ${recording.id}`);
+            return { disposition: "stage_completed", recordingId: result.id, state: result.state };
+        } catch (error) {
+            if (!(error instanceof StageDeferredError)) throw error;
+            return { disposition: "resource_wait", recordingId: recording.id, reason: error.message };
+        }
+    }
+
+    private async maintainShorts(now: Date): Promise<CampaignStepResult | null> {
+        if (!this.config.automaticShortsEnabled) return null;
+        const shorts = await maintainAutomaticShorts(this.database, this.config, this.resolver, now);
+        return shorts.joined.length || shorts.registered
+            ? { disposition: shorts.joined.length ? "shorts_joined" : "shorts_waiting", ...shorts } : null;
+    }
+
+    // One step when conversion runs ahead. In a lane: that lane's own stage. Without one (a
+    // manual campaign-step): a home upload when one can go, else the oldest local stage, else
+    // a new recording while the cap and the disk allow.
+    private async stepAhead(control: CampaignControl, reviewRequired: number, hold: string | null, now: Date): Promise<CampaignStepResult> {
+        const lane = this.options.lane;
+        if (lane === "upload") {
+            const uploaded = await this.uploadAhead(control, hold, now);
+            return typeof uploaded === "string" ? { disposition: "idle", reviewRequired, uploads: uploaded } : uploaded;
+        }
+        if (lane === "describe") {
+            return await this.localAhead(control, LANE_STATES.describe, false, null, now) ?? { disposition: "idle", reviewRequired };
+        }
+        const shorts = await this.maintainShorts(now);
+        if (shorts) return shorts;
+        let uploads = "in the upload lane";
+        if (!lane) {
+            const uploaded = await this.uploadAhead(control, hold, now);
+            if (typeof uploaded !== "string") return uploaded;
+            uploads = uploaded;
+        }
+        const room = await this.aheadRoom(control);
+        const local = await this.localAhead(control, lane === "convert" ? LANE_STATES.convert : LOCAL_STATES, true, room, now);
+        if (local) return local;
         if (!room.admits) return { disposition: "full_ahead", reviewRequired, uploads, ...room };
         return { disposition: "idle", reviewRequired, uploads };
     }
 
     async step(now = new Date()): Promise<CampaignStepResult> {
-        // Track local availability separately; never erase remote history.
-        const swept = await sweepMissingRecordings(this.database, this.config, now);
-        if (swept.length > 0) {
-            console.log(JSON.stringify({ event: "campaign-sweep", swept }));
+        // Track local availability separately; never erase remote history (one lane does it).
+        if (!this.options.lane || this.options.lane === "convert") {
+            const swept = await sweepMissingRecordings(this.database, this.config, now);
+            if (swept.length > 0) console.log(JSON.stringify({ event: "campaign-sweep", swept }));
         }
         let control = this.database.getCampaignControl();
         const comparison = this.database.getComparisonTrial();
@@ -389,6 +428,8 @@ export class CampaignWorker {
                 ? control.attentionReason ?? `cooldown until ${control.resumeAt}` : this.options.uploadHold ?? null;
             return await this.stepAhead(control, reviewRequired, hold, now);
         }
+        // A trial or a comparison runs one stage at a time, in the upload lane alone.
+        if (this.options.lane && this.options.lane !== "upload") return { disposition: "idle", reviewRequired };
 
         if (this.config.comparisonTrialOnly && !comparison) {
             this.database.setCampaignState("paused", now);

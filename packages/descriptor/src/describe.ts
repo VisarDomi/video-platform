@@ -31,6 +31,9 @@ export interface DescribeArtifactOptions {
     // prompt so new descriptions avoid them; part of the prompt version.
     readonly avoidPhrases?: readonly string[];
     readonly manageServer?: boolean;
+    // The managed server stays loaded after this description (started only if it is not
+    // running); the caller stops it.
+    readonly keepServer?: boolean;
     readonly now?: () => Date;
     readonly evidenceKey?: string;
     // Called when the description is not cached, before any work starts (the
@@ -127,7 +130,7 @@ export async function describeArtifact(
 
     try {
         staged = await stageMedia(upright?.path ?? mediaPath, descriptorConfig.mediaDirectory);
-        if (manageServer) await server.start();
+        if (manageServer) await (options.keepServer ? server.ensureStarted() : server.start());
         const request = () => requestDescription(staged!.url, fps, prompt);
         const result = await (manageServer ? server.requestWithRecovery(request) : request());
         await fs.mkdir(evidenceDirectory, { recursive: true });
@@ -151,6 +154,6 @@ export async function describeArtifact(
     } finally {
         await staged?.remove();
         await upright?.remove();
-        if (manageServer) await server.stop();
+        if (manageServer && !options.keepServer) await server.stop();
     }
 }

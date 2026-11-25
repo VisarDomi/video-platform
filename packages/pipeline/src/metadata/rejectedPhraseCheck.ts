@@ -5,6 +5,7 @@ import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { containedPhrases } from "../upload/providerWarnings.js";
 import { composeUploadMetadata } from "./composeUploadMetadata.js";
 import { contentProfile } from "../contentProfile.js";
+import { keptDescriptionModel } from "../stages/descriptionModel.js";
 
 export type RejectedPhraseVerdict =
     | { kind: "clean" }
@@ -66,13 +67,21 @@ async function rewriteText(database: PipelineDatabase, recordingId: string, rewr
     return true;
 }
 
+// The local model's rewrite: on the worker's kept model when there is one (one request at a
+// time with the descriptions), else on a model loaded for this call.
+const rewriteWithModel: DescriptionRewriter = (text, phrases) => {
+    const kept = keptDescriptionModel();
+    return kept ? kept.use((server) => rewriteAvoidingPhrases(text, phrases, { server, keepServer: true }))
+        : rewriteAvoidingPhrases(text, phrases);
+};
+
 // Apply a verdict to a metadata_ready recording before any bytes are sent.
 export async function settleRejectedPhrases(
     database: PipelineDatabase,
     recordingId: string,
     provider: ActiveUploadProvider,
     now = new Date(),
-    rewrite: DescriptionRewriter | null = (text, phrases) => rewriteAvoidingPhrases(text, phrases),
+    rewrite: DescriptionRewriter | null = rewriteWithModel,
 ): Promise<RejectedPhraseVerdict> {
     const verdict = await checkRejectedPhrases(database, recordingId, provider);
     if (verdict.kind === "clean") return verdict;
