@@ -193,7 +193,7 @@ async function realSetup(t) {
     const stateDir = path.join(root, 'state');
     mkdirSync(stateDir, { mode: 0o700 });
     const entry = { id: 'form-host', plugin: 'plugin-form-host', config: { baseUrl: sim.urls['form-host'], retryDelayMs: 0 } };
-    const pc = formHost.createDestination({ config: entry.config, stateDir, browser: { executablePath: '/unused', profilePath: '/unused' },
+    const pc = formHost.createDestination({ config: entry.config, stateDir,
         credentials: () => ({ email: 'coach', password: 'pw' }), stopSignal: new AbortController().signal });
     // The PC signs in once with an upload of its own.
     const warm = { recordingId: 'w', uploadIdentity: 'warm', artifactPath: artifact, sizeBytes: statSync(artifact).size,
@@ -208,7 +208,7 @@ async function realSetup(t) {
     writeFileSync(network, 'office-net\n');
     const info = path.join(root, 'runner.json');
     writeFileSync(info, JSON.stringify({ commit: 'c1' }));
-    const command = ['env', `VIDEO_UPLINK_RUNNER_INFO=${info}`, 'VIDEO_CHROMIUM_PATH=/unused', process.execPath, '--no-warnings', RUNNER];
+    const command = ['env', `VIDEO_UPLINK_RUNNER_INFO=${info}`, process.execPath, '--no-warnings', RUNNER];
     const sha256 = createHash('sha256').update(readFileSync(artifact)).digest('hex');
     const make = (overrides = {}) => new RemoteDestination(pc, formHost, entry, stateDir, {
         uplink: { id: 'office', dailyBytes: 1, network: { gateway: 'office-net', probe: ['cat', network] },

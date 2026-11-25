@@ -46,12 +46,6 @@ async function carrierMatches(carrier: CarrierLocation): Promise<boolean> {
     } catch { return false; }
 }
 
-async function browserVersion(): Promise<string | null> {
-    const executable = process.env.VIDEO_CHROMIUM_PATH;
-    if (!executable) return null;
-    try { return (await run(executable, ["--version"], { timeout: 20_000 })).stdout.trim() || null; } catch { return null; }
-}
-
 // A file name the PC may ask for: one plain name inside the carrier's files folder.
 function safeName(name: unknown): string {
     if (typeof name !== "string" || !name || name !== path.basename(name) || name.startsWith(".") || name.includes("\0")) {
@@ -60,7 +54,7 @@ function safeName(name: unknown): string {
     return name;
 }
 
-// The runner's private folder (the session file, the browser profile) lives only as long
+// The runner's private folder (the session file) lives only as long
 // as its upload; one left by a runner that was killed is deleted by the next upload.
 const SCRATCH_PREFIX = "video-uplink-";
 const STALE_SCRATCH_MS = 6 * 60 * 60_000;
@@ -162,7 +156,7 @@ async function probe(message: Record<string, unknown>): Promise<Record<string, u
     return {
         type: "probe", identity, onUplink: identity === network.gateway,
         carrier: { present, matches, files, freeBytes },
-        browser: await browserVersion(), platform: process.platform, commit: await runnerCommit(),
+        platform: process.platform, commit: await runnerCommit(),
     };
 }
 
@@ -201,8 +195,6 @@ async function upload(runner: Runner, message: Record<string, unknown>): Promise
     if (await sha256(artifactPath, runner.signal) !== file.sha256) {
         throw new TransferAbortedBeforeSubmissionError(`uplink: carrier file ${name} does not match its ledger hash; nothing was sent`);
     }
-    const executablePath = process.env.VIDEO_CHROMIUM_PATH;
-    if (!executablePath) throw new Error("uplink: VIDEO_CHROMIUM_PATH names no browser for the runner");
     const plugin = await loadDestinationPlugin(entry);
     if (!plugin.createCompanionDestination) throw new Error(`uplink: destination ${entry.id} cannot upload on a shared session`);
 
@@ -221,12 +213,10 @@ async function upload(runner: Runner, message: Record<string, unknown>): Promise
         const host: DestinationHost = {
             config: entry.config ?? {},
             stateDir: path.join(scratch, "state"),
-            browser: { executablePath, profilePath: path.join(scratch, "profile"), headless: true },
             credentials: () => { throw new Error("the uplink runner never signs in"); },
             stopSignal: runner.signal,
         };
         await mkdir(host.stateDir, { recursive: true, mode: 0o700 });
-        await mkdir(host.browser.profilePath, { recursive: true, mode: 0o700 });
         const destination = plugin.createCompanionDestination(host, session,
             async (replaced) => { await runner.report({ type: "session", session: replaced }); });
         const outcome = await destination.upload({

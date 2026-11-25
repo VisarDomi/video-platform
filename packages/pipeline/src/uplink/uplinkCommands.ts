@@ -14,7 +14,6 @@ export interface UplinkProbe {
         readonly files: ReadonlyArray<{ readonly name: string; readonly sizeBytes: number }>;
         readonly freeBytes: number | null;
     };
-    readonly browser: string | null;
     readonly platform: string;
     readonly commit: string | null;
 }
@@ -24,7 +23,7 @@ export function requireUplink(config: Pick<PipelineConfig, "uplink">): UplinkSet
     return config.uplink;
 }
 
-// Asks the runner where it is: its network, the carrier and its files, its browser, its commit.
+// Asks the runner where it is: its network, the carrier and its files, its commit.
 export async function probeUplink(config: Pick<PipelineConfig, "uplink" | "databasePath">, carrierRoot?: string, signal?: AbortSignal): Promise<UplinkProbe> {
     const uplink = requireUplink(config);
     const answer = await RunnerConnection.ask(uplink.runner, await deployedRunnerCommit(config.databasePath), {
@@ -38,7 +37,6 @@ export async function probeUplink(config: Pick<PipelineConfig, "uplink" | "datab
             present: carrier?.present === true, matches: carrier?.matches === true,
             files: Array.isArray(carrier?.files) ? carrier.files : [], freeBytes: carrier?.freeBytes ?? null,
         },
-        browser: typeof answer.browser === "string" ? answer.browser : null,
         platform: String(answer.platform), commit: typeof answer.commit === "string" ? answer.commit : null,
     };
 }

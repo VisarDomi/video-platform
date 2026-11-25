@@ -7,7 +7,7 @@ import type { Readable } from "node:stream";
 //   upload   the PC sends the request, the session and where the file is; the runner sends
 //            progress, evidence and session lines, each waiting for the PC's ack (the PC
 //            records it durably first), then one result or error line.
-//   probe    the runner answers with the network it is on, the carrier, the browser.
+//   probe    the runner answers with the network it is on, the carrier.
 //   release  the runner unmounts the carrier when nothing is left to send.
 //
 // The PC pings every ten seconds; a runner that hears nothing for a minute, or whose stdin

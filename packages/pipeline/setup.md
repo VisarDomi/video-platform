@@ -655,7 +655,7 @@ node packages/pipeline/dist/main.js carrier-writeoff --carrier ID --apply  # a c
 ```
 
 ```bash
-# Where the runner is: its network, the carrier and its files, its browser, its commit.
+# Where the runner is: its network, the carrier and its files, its commit.
 node packages/pipeline/dist/main.js uplink-probe [--carrier-dir DIR]
 # One upload from the uplink (the worker stopped); --carrier-dir names another carrier folder.
 VIDEO_PIPELINE_NETWORK_UPLOADS=1 node packages/pipeline/dist/main.js upload-one \

@@ -137,7 +137,8 @@ export interface Destination {
 }
 
 // What the host gives a destination it creates. The host owns the browser profile (it
-// refuses everyday and shared profiles); the plug-in only uses it. Where a destination
+// refuses everyday and shared profiles); the plug-in only uses it. A host that runs no
+// browser (the uplink runner) gives none, and a destination that needs one refuses. Where a destination
 // keeps its signed-in session is its own business: its state folder, or its config.
 export interface DestinationHost {
     // The destination's own block from its sites-file entry ("config"): addresses, choices.
@@ -145,7 +146,7 @@ export interface DestinationHost {
     // The destination's private state folder (created by the core, mode 0700), for what it
     // keeps between runs, such as its signed-in session.
     readonly stateDir: string;
-    readonly browser: { readonly executablePath: string; readonly profilePath: string; readonly headless?: boolean };
+    readonly browser?: { readonly executablePath: string; readonly profilePath: string };
     // Read only when a password login actually happens (never for uploads, lookups or
     // session checks on the shared login), so those keep working without the file.
     readonly credentials: () => { readonly email: string; readonly password: string };
