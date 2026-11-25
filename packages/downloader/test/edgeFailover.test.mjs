@@ -1,5 +1,5 @@
-// Stitching across copies (CDN edges). The capture e2e against the simulator found
-// both cases (docs/showcase-work/sim-capture.md, B1 and B2): copies number their
+// Stitching across copies (CDN edges). The capture e2e against the simulator shows
+// both cases: copies number their
 // segments independently and stamp date-times with their own clocks, so after a
 // failover the segments the new copy re-lists are recognised by date-time only.
 import assert from 'node:assert/strict';

@@ -436,10 +436,10 @@ confirmation pending; a retired destination never becomes active again.
 
 Credentials live in `~/.config/video-services/upload-providers.json` (chmod
 600 is enforced; format in `config/upload-providers.example.json`; override
-`VIDEO_UPLOAD_PROVIDERS_FILE`). The uploader drives a headed Chromium
-(`/usr/bin/chromium`, override `VIDEO_CHROMIUM_PATH`) through a persistent
-profile; outside the service set `DISPLAY=:111`. Only one Chromium may use a
-profile directory at a time.
+`VIDEO_UPLOAD_PROVIDERS_FILE`). A destination that drives a browser (for an upload or
+a sign-in) gets a headed Chromium (`/usr/bin/chromium`, override `VIDEO_CHROMIUM_PATH`)
+on a persistent profile the core owns; outside the service set `DISPLAY=:111`. Only one
+Chromium may use a profile directory at a time. The uplink runner gives no browser.
 
 Before any bytes are sent, an upload checks: the recording has no verified or
 pending remote copy in the ledger, passed `resolution-policy-v6`, fits the
