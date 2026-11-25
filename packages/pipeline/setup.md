@@ -245,8 +245,9 @@ conversion/upload from the unchanged original again. Retry only that part/batch,
 retry deletes its new conversion and starts a **new** seven-day retry window
 and daily checks. Other recordings continue during the wait. Auth/network/CDN failures remain inconclusive;
 a published but uncertain rendition is retained for verification, checked daily (the
-destination keeps a published copy; it is never uploaded again). The owner may accept a
-published copy whose best version stays below Full-HD as backed up:
+destination keeps a published copy; it is never uploaded again), indefinitely. Only an
+explicit owner decision about named copies accepts one whose best version stays below
+Full-HD as backed up:
 `accept-below-full-hd --remote-id <id> [--remote-id <id> ...] --apply` (worker stopped; without
 `--apply` a preview; with the worker's `VIDEO_PIPELINE_CLEANUP=1`) verifies it as it is, ending
 its daily check, releasing its conversion's retention hold and cleaning the conversion up, and
