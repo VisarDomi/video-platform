@@ -244,7 +244,14 @@ processing without a public copy at least seven days after acceptance, queue
 conversion/upload from the unchanged original again. Retry only that part/batch, retaining other parts. A successful
 retry deletes its new conversion and starts a **new** seven-day retry window
 and daily checks. Other recordings continue during the wait. Auth/network/CDN failures remain inconclusive;
-a published but uncertain rendition is retained for verification. Known provider
+a published but uncertain rendition is retained for verification, checked daily (the
+destination keeps a published copy; it is never uploaded again). The owner may accept a
+published copy whose best version stays below Full-HD as backed up:
+`accept-below-full-hd --remote-id <id> [--remote-id <id> ...] --apply` (worker stopped; without
+`--apply` a preview) verifies it as it is, ending its daily check, cleaning up its conversion
+and making its original cleanup-eligible; its evidence keeps `accepted_below_full_hd` with the
+best version found. It refuses any ID whose last check found no published copy or a Full-HD
+version. Known provider
 removals and previously verified copies later removed remain restoration bans.
 All retry traffic counts against the uplink's allowance.
 

@@ -32,6 +32,7 @@ import { assertUploadProvider } from "./config/uploadProviders.js";
 import { checkRejectedPhrases } from "./metadata/rejectedPhraseCheck.js";
 import { retryRecording } from "./commands/retryRecording.js";
 import { contentProfile, initContentProfile } from "./contentProfile.js";
+import { acceptBelowFullHd } from "./commands/acceptBelowFullHd.js";
 import { readFile } from "node:fs/promises";
 import { parseDestinations } from "sdk";
 
@@ -43,6 +44,7 @@ function usage(): never {
         "  remux-one --recording PATH [--upscale1080p | --upscale1440p]",
         "  describe-one --recording ID",
         "  process-one --apply | provenance-refresh --apply | provenance-review",
+        "  accept-below-full-hd --remote-id <id> [--remote-id <id> ...] [--apply]",
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
         "  review | retry ID | upload-plan",
         "  upload-one --recording ID [--uplink ID [--carrier-dir DIR]] --apply | reconcile-uploads --apply",
@@ -117,7 +119,7 @@ async function main(): Promise<void> {
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
         "upload-provider", "metadata-check", "uplink-probe", "carrier-init", "carrier-status", "carrier-recall",
-        "carrier-writeoff", "carrier-pass", "office-tick"].includes(command ?? "")) {
+        "carrier-writeoff", "carrier-pass", "office-tick", "accept-below-full-hd"].includes(command ?? "")) {
         // Not a core command: a destination's own (named by its sites-file entry), or none.
         const run = await destinationCommand(command ?? "");
         if (!run) {
@@ -204,6 +206,19 @@ async function main(): Promise<void> {
     if (command === "carrier-init") {
         requireApply(process.argv.slice(3));
         console.log(JSON.stringify(await initCarrier(pipelineConfig), null, 2));
+        return;
+    }
+    if (command === "accept-below-full-hd") {
+        // accept-below-full-hd --remote-id <id> [--remote-id <id> ...] [--apply]
+        const args = process.argv.slice(3);
+        const apply = args.includes("--apply");
+        if (apply) assertCampaignIdle(pipelineConfig);
+        const remoteIds = args.flatMap((arg, index) => arg === "--remote-id" && args[index + 1] ? [args[index + 1]] : []);
+        if (!remoteIds.length) usage();
+        const database = new PipelineDatabase(pipelineConfig.databasePath);
+        try {
+            console.log(JSON.stringify(await acceptBelowFullHd(database, pipelineConfig, database.getActiveUploadProvider(), remoteIds, apply), null, 2));
+        } finally { database.close(); }
         return;
     }
     if (command === "carrier-status") {

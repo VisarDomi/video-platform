@@ -2435,6 +2435,15 @@ export class PipelineDatabase {
         });
     }
 
+    // The pending check of an upload the destination gave this ID, with its evidence.
+    pendingUploadByRemoteId(provider: string, remoteId: string): { attemptId: string; recordingId: string; evidence: unknown[] } | null {
+        const row = this.database.prepare(`SELECT a.id, a.recording_id, a.evidence_json FROM upload_attempts a
+            JOIN upload_confirmations c ON c.attempt_id = a.id
+            WHERE a.provider = ? AND a.remote_id = ? AND a.status = 'uncertain' AND c.status = 'pending'`).get(provider, remoteId) as
+            { id: string; recording_id: string; evidence_json: string } | undefined;
+        return row ? { attemptId: row.id, recordingId: row.recording_id, evidence: JSON.parse(row.evidence_json) as unknown[] } : null;
+    }
+
     verifyUpload(attemptId: string, remoteId: string, remoteUrl: string, now = new Date()): Recording {
         return this.transaction(() => {
             const r = this.reconcileUncertain(attemptId, remoteId, remoteUrl, now);
