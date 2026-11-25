@@ -277,3 +277,20 @@ export async function campaignStep(config: PipelineConfig, options: CampaignStep
         if (config.comparisonTrialOnly) await writeComparisonReport(config);
     }
 }
+
+// prepare-one: one named recording through the worker's own local stages, with the worker
+// stopped. It never uploads: the recording ends ready (metadata_ready) or held by the ledger.
+export async function prepareOne(config: PipelineConfig, recordingId: string): Promise<unknown> {
+    const database = new PipelineDatabase(config.databasePath);
+    try {
+        if (database.getProductionVersion() !== CURRENT_PRODUCTION_VERSION) {
+            throw new Error(`Pipeline database is waiting for ${CURRENT_PRODUCTION_VERSION} rollover`);
+        }
+        const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
+        const worker = new CampaignWorker(database, config, resolver, undefined, `pipeline-prepare-one-${process.pid}`);
+        const result = await worker.prepare(recordingId);
+        return { ...result, metadata: database.getUploadMetadata(recordingId) };
+    } finally {
+        database.close();
+    }
+}

@@ -631,3 +631,33 @@ test("already-discovered recordings missing provenance resolve on demand instead
     assert.equal(step.state, "metadata_ready");
     assert.equal(database.getProvenance(recording.id)?.status, "resolved");
 });
+
+test("prepare runs one named recording through the local stages to ready, never uploading, and leaves the rest alone", async (t) => {
+    const { database, config, resolver, recording } = await campaignWorkerFixture(t);
+    const root = path.dirname(path.dirname(path.dirname(recording.sourcePath)));
+    const authority = new DatabaseSync(config.finalizationDatabasePath);
+    const olderPath = await addFinalized(authority, path.join(root, "live-a", "edited"), "2026-08-16 110000 olderalias");
+    const namedPath = await addFinalized(authority, path.join(root, "live-a", "edited"), "2026-08-16 130000 namedalias");
+    authority.close();
+    const older = database.discover((await inspectFinalizedRecording(olderPath, "live-a", "edited")).recording);
+    const named = database.discover((await inspectFinalizedRecording(namedPath, "live-a", "edited")).recording);
+    const uploads = [];
+    const worker = new CampaignWorker(database, config, resolver, async id => { uploads.push(id); }, undefined, "worker-test");
+    const processed = [];
+    worker.orchestrator = { processRecording: async id => {
+        processed.push(id);
+        // Each call is one stage, as the orchestrator's are.
+        database.transition(id, "server_ready", "blocked", "fixture: stood in for the stages");
+        database.transition(id, "blocked", "metadata_ready", "fixture");
+        return database.get(id);
+    } };
+    const result = await worker.prepare(named.id);
+    assert.equal(result.state, "metadata_ready");
+    assert.deepEqual(processed, [named.id], "only the named recording, though an older one waits");
+    assert.deepEqual(uploads, [], "prepare uploads nothing");
+    assert.equal(database.get(older.id).state, "server_ready");
+    assert.ok(database.getProvenance(named.id), "provenance resolved before the stages");
+    // Already past the local stages: nothing runs.
+    assert.equal((await worker.prepare(recording.id)).state, "metadata_ready");
+    assert.deepEqual(processed, [named.id]);
+});

@@ -133,6 +133,32 @@ export class CampaignWorker {
         );
     }
 
+    // One named recording through the worker's own local stages (the server's authority, the
+    // current resolution policy, provenance, conversion, validation, description) until it
+    // leaves them: ready to upload, or held for a reason the ledger records. Uploads nothing.
+    async prepare(recordingId: string, now = () => new Date()): Promise<CampaignStepResult> {
+        const local = ["server_ready", "remuxed", "artifact_valid", "described"];
+        for (;;) {
+            const recording = this.database.get(recordingId);
+            if (!recording) throw new Error(`Unknown pipeline recording ${recordingId}`);
+            if (recording.sourceKind !== "edited") throw new Error(`Recording ${recordingId} is not an edited recording`);
+            if (!local.includes(recording.state)) {
+                return { disposition: "stage_completed", recordingId, state: recording.state };
+            }
+            await verifyCurrentServerAuthority(recording, this.config, this.database);
+            if (await this.enforceCurrentResolutionPolicy(recording, now())) continue;
+            await this.ensureProvenance(recording, now());
+            try {
+                const result = await this.orchestrator.processRecording(recordingId, now());
+                if (!result) throw new Error(`Could not claim recording ${recordingId} (another worker holds it)`);
+                console.error(JSON.stringify({ event: "prepare-stage", recordingId, state: result.state }));
+            } catch (error) {
+                if (!(error instanceof StageDeferredError)) throw error;
+                return { disposition: "resource_wait", recordingId, reason: error.message };
+            }
+        }
+    }
+
     // One prepared recording's upload: the last checks, the allowance, the upload and what
     // its outcome means for the campaign.
     private async uploadPrepared(uploadReady: Recording, control: CampaignControl, comparison: unknown, now: Date): Promise<CampaignStepResult> {

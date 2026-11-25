@@ -22,6 +22,7 @@ import {
     campaignStatus,
     campaignStep,
     configureCampaign,
+    prepareOne,
     setCampaignRunning,
 } from "./commands/campaign.js";
 import type { CampaignProviderFilter } from "./domain/types.js";
@@ -43,6 +44,7 @@ function usage(): never {
         "  status | discover-plan | discover --apply",
         "  remux-one --recording PATH [--upscale1080p | --upscale1440p]",
         "  describe-one --recording ID",
+        "  prepare-one --recording ID --apply   (the worker's own conversion and description; no upload)",
         "  process-one --apply | provenance-refresh --apply | provenance-review",
         "  accept-below-full-hd --remote-id <id> [--remote-id <id> ...] [--apply]",
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
@@ -114,7 +116,7 @@ async function destinationCommand(command: string): Promise<((args: readonly str
 
 async function main(): Promise<void> {
     const command = process.argv[2];
-    if (!["status", "discover-plan", "discover", "remux-one", "describe-one", "process-one", "provenance-refresh",
+    if (!["status", "discover-plan", "discover", "remux-one", "describe-one", "process-one", "prepare-one", "provenance-refresh",
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
@@ -132,7 +134,7 @@ async function main(): Promise<void> {
     // The deployment's content profile (named by its sites file) drives descriptions and
     // upload metadata. The worker and the stage commands stop here, before touching
     // anything, without it; session upkeep and reports run either way.
-    if (!await initContentProfile() && ["campaign-worker", "campaign-step", "describe-one", "process-one",
+    if (!await initContentProfile() && ["campaign-worker", "campaign-step", "describe-one", "process-one", "prepare-one",
         "metadata-check", "retry", "upload-one", "office-tick"].includes(command ?? "")) contentProfile();
     if (command === "campaign-prepare") {
         requireApply(process.argv.slice(3));
@@ -189,6 +191,15 @@ async function main(): Promise<void> {
         const recordingId = option(args, "--recording");
         if (!recordingId) usage();
         console.log(JSON.stringify(await describeOne(recordingId, pipelineConfig), null, 2));
+        return;
+    }
+    if (command === "prepare-one") {
+        assertCampaignIdle(pipelineConfig);
+        const args = process.argv.slice(3);
+        requireApply(args);
+        const recordingId = option(args, "--recording");
+        if (!recordingId) usage();
+        console.log(JSON.stringify(await prepareOne(pipelineConfig, recordingId), null, 2));
         return;
     }
     if (command === "upload-one") {
