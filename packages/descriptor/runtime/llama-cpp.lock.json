@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repository": "git@github.com:VisarDomi/llama.cpp.git",
   "branch": "video-platform-fps",
-  "commit": "7ace165e3368b58ef3b8cd713065fba166c988d2",
+  "commit": "1b2f2c82962971fd4afd8dc8842758230b171881",
   "cmakeArgs": [
     "-DGGML_CUDA=ON",
     "-DCMAKE_CUDA_ARCHITECTURES=86",
