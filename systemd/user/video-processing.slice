@@ -3,7 +3,7 @@ Description=Video batch processing aggregate resource boundary
 
 [Slice]
 CPUQuota=
-MemoryHigh=50%
-MemoryMax=65%
+MemoryHigh=65%
+MemoryMax=75%
 MemorySwapMax=0
 IOWriteBandwidthMax=/ 50M
