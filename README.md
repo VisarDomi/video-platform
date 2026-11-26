@@ -6,6 +6,11 @@ describes them, uploads them to a video host, and verifies the uploads until the
 safe to clean up locally. It runs unattended on one PC and is built to survive a power cut
 at any moment.
 
+It runs every day in production. A test program with its write rules lost no saved data in
+160 random power cuts of a virtual machine; with ordinary writes it lost data in 17 of 30
+([deploy/vm/README.md](deploy/vm/README.md)). `npm run demo` runs the whole platform
+against the simulator ([Running it](#running-it)).
+
 The core knows no site. Live sources, file hosts, upload destinations and the way
 recordings are described are **plug-ins** behind a small SDK. This repository ships the
 core, the SDK, a **simulator** of every kind of site, and public plug-ins written against
