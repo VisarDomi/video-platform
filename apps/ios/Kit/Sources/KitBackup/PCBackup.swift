@@ -57,7 +57,7 @@ public final class PCBackup {
     private var saveState = SaveState.idle
     private var identityGeneration: UInt64 = 0
 
-    // `scope`: "<app>:<provider>" (e.g. "gallery-reader:hitomi").
+    // `scope`: "<app>:<provider>" (e.g. "manga-reader:asura").
     public init(scope: String, base: URL, key: String, trust: LocalTrust?, directory: URL,
                 capture: @escaping () -> [String: Any], restore: @escaping (Any) throws -> Void, stats: @escaping (Any) throws -> String,
                 configure: (@Sendable (URLSessionConfiguration) -> Void)? = nil) {
