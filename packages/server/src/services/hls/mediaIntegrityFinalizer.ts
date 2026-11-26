@@ -16,10 +16,13 @@ import { pendingRoot, publishPendingRecording } from "./pendingRecordingPublishe
 
 const CATCH_UP_INTERVAL_MS = 60 * 60_000;
 const QUEUE_COOLDOWN_MS = 15_000;
-// Expose one validation lane per cgroup-aware available CPU so the systemd
-// slice has enough runnable work to use its quota. On the current host Node
-// reports 6 here for CPUQuota=600%; systemd remains the CPU authority.
-const QUEUE_WORKER_COUNT = os.availableParallelism();
+// Keep background finalization concurrency bounded so null-decode ffmpeg workers never
+// compete with interactive HLS streaming or API requests inside video-server.service.
+const QUEUE_WORKER_COUNT = Math.max(
+    1,
+    Number.parseInt(process.env.VIDEO_FINALIZER_CONCURRENCY ?? "", 10)
+        || Math.min(4, Math.max(2, Math.floor(os.availableParallelism() / 3))),
+);
 const DEEP_SCAN_CHECKPOINT_INTERVAL = 25;
 const MAX_CAPTURED_STDERR_BYTES = 16_384;
 const IGNORED_NULL_MUXER_ERROR = "Application provided invalid, non monotonically increasing dts to muxer";
@@ -295,6 +298,9 @@ export function validateMediaWithFfmpeg(inputPath: string): Promise<MediaValidat
         const child = spawn("ffmpeg", buildFfmpegValidationArgs(inputPath), {
             stdio: ["ignore", "ignore", "pipe"],
         });
+        if (child.pid) {
+            try { os.setPriority(child.pid, 10); } catch {}
+        }
 
         const errors = new FfmpegErrorCollector();
         let spawnError: Error | null = null;

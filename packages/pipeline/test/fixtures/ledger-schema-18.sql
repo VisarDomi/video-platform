@@ -151,7 +151,8 @@ CREATE TABLE upload_reservations (
         reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes > 0),
         status TEXT NOT NULL CHECK (status IN ('reserved', 'consumed', 'released')),
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        uplink TEXT NOT NULL DEFAULT 'home'
     ) STRICT;
 CREATE UNIQUE INDEX one_active_reservation_idx ON upload_reservations (recording_id) WHERE status = 'reserved';
 CREATE TABLE upload_attempts (
@@ -175,7 +176,8 @@ CREATE TABLE upload_attempts (
         limited_visibility TEXT,
         metadata_rejection TEXT,
         evidence_json TEXT NOT NULL DEFAULT '[]',
-        transfer_started INTEGER NOT NULL DEFAULT 0
+        transfer_started INTEGER NOT NULL DEFAULT 0,
+        uplink TEXT NOT NULL DEFAULT 'home'
     ) STRICT;
 CREATE TABLE bandwidth_events (
         id INTEGER PRIMARY KEY,
@@ -184,7 +186,8 @@ CREATE TABLE bandwidth_events (
         provider TEXT NOT NULL,
         calendar_month TEXT NOT NULL,
         transmitted_bytes INTEGER NOT NULL CHECK (transmitted_bytes >= 0),
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        uplink TEXT NOT NULL DEFAULT 'home'
     ) STRICT;
 CREATE TABLE upload_confirmations (
         attempt_id TEXT PRIMARY KEY REFERENCES upload_attempts(id),
@@ -270,7 +273,7 @@ CREATE TABLE campaign_control (
         state TEXT NOT NULL CHECK (state IN ('paused', 'running')),
         provider_filter TEXT NOT NULL,
         ordering TEXT NOT NULL CHECK (ordering = 'oldest'),
-        monthly_upload_limit_bytes INTEGER NOT NULL CHECK (monthly_upload_limit_bytes > 0),
+        daily_upload_limit_bytes INTEGER NOT NULL CHECK (daily_upload_limit_bytes > 0),
         antibot_failures INTEGER NOT NULL DEFAULT 0,
         resume_at TEXT,
         updated_at TEXT NOT NULL,
@@ -370,4 +373,35 @@ CREATE TABLE retired_remote_uploads (
         verified_at TEXT NOT NULL,
         retired_at TEXT NOT NULL,
         PRIMARY KEY (production_version, recording_id, artifact_part)
+    ) STRICT;
+CREATE TABLE carrier_files (
+        carrier_id TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        recording_id TEXT NOT NULL REFERENCES recordings(id),
+        artifact_part TEXT NOT NULL CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p') OR (artifact_part GLOB 'shape[1-9]*' AND artifact_part NOT GLOB 'shape*[^0-9]*')),
+        size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+        sha256 TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('copied', 'uploaded', 'removed')),
+        copied_at TEXT NOT NULL,
+        settled_at TEXT,
+        PRIMARY KEY (carrier_id, file_name)
+    ) STRICT;
+CREATE INDEX carrier_files_recording_idx ON carrier_files (recording_id);
+CREATE UNIQUE INDEX carrier_files_one_copy_idx ON carrier_files (recording_id) WHERE state = 'copied';
+CREATE TABLE carrier_state (
+        carrier_id TEXT PRIMARY KEY,
+        location TEXT NOT NULL CHECK (location IN ('home', 'away', 'uplink')),
+        seen_at TEXT NOT NULL,
+        free_bytes INTEGER,
+        in_transit_bytes INTEGER NOT NULL DEFAULT 0,
+        note TEXT,
+        last_notice TEXT,
+        last_notice_at TEXT
+    ) STRICT;
+CREATE TABLE uplink_holds (
+        uplink TEXT PRIMARY KEY,
+        resume_at TEXT,
+        reason TEXT,
+        failures INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0),
+        updated_at TEXT NOT NULL
     ) STRICT;

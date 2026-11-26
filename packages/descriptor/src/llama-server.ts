@@ -1,8 +1,40 @@
 import { ChildProcess, spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { descriptorConfig } from "./config.js";
+
+// Recycle a long-lived llama-server between descriptions if its resident RAM ever climbs
+// past this threshold (default 10 GiB; Gemma-4 E4B Q8 + vision projector normally sits
+// around 2-4 GiB host RSS with --cache-ram 0).
+const MAX_KEPT_SERVER_RSS_BYTES = Number(process.env.DESCRIPTOR_MAX_RSS_GIB ?? 10) * 2 ** 30;
+const STALE_MEDIA_AGE_MS = 24 * 60 * 60_000;
+
+async function readProcessRssBytes(pid: number): Promise<number | null> {
+    try {
+        const status = await readFile(`/proc/${pid}/status`, "utf8");
+        const match = status.match(/^VmRSS:\s+(\d+)\s+kB/m);
+        return match ? Number(match[1]) * 1024 : null;
+    } catch {
+        return null;
+    }
+}
+
+async function pruneStaleMedia(mediaDirectory: string): Promise<void> {
+    const entries = await readdir(mediaDirectory, { withFileTypes: true }).catch(() => []);
+    const cutoff = Date.now() - STALE_MEDIA_AGE_MS;
+    for (const entry of entries) {
+        const fullPath = path.join(mediaDirectory, entry.name);
+        if (entry.isSymbolicLink()) {
+            // Broken symlinks or symlinks older than 24 h are leftovers from crashed runs.
+            const target = await stat(fullPath).catch(() => null);
+            if (!target || target.mtimeMs < cutoff) await unlink(fullPath).catch(() => undefined);
+        } else if (entry.isFile() && entry.name.endsWith(".upright.mp4")) {
+            const info = await stat(fullPath).catch(() => null);
+            if (info && info.mtimeMs < cutoff) await unlink(fullPath).catch(() => undefined);
+        }
+    }
+}
 
 async function readIoPressureSomeAvg10(): Promise<number | null> {
     try {
@@ -47,9 +79,22 @@ export class LlamaServer {
     }
 
     // Starts the server unless this instance's process is already up: a server kept loaded
-    // between descriptions. One that died meanwhile is started again.
+    // between descriptions. One that died meanwhile, or whose host RSS drifted past the
+    // safety ceiling, is started fresh.
     async ensureStarted(): Promise<void> {
-        if (this.running) return;
+        if (this.running) {
+            const pid = this.child?.pid;
+            if (pid && !this.config.useExternalServer && Number.isFinite(MAX_KEPT_SERVER_RSS_BYTES) && MAX_KEPT_SERVER_RSS_BYTES > 0) {
+                const rss = await readProcessRssBytes(pid);
+                if (rss !== null && rss > MAX_KEPT_SERVER_RSS_BYTES) {
+                    console.log(JSON.stringify({ event: "descriptor-recycle", reason: "rss_ceiling", rssBytes: rss, limitBytes: MAX_KEPT_SERVER_RSS_BYTES }));
+                    await this.stopChild();
+                    await this.start();
+                    return;
+                }
+            }
+            return;
+        }
         if (this.child) await this.stopChild();
         await this.start();
     }
@@ -71,6 +116,7 @@ export class LlamaServer {
         if (this.stopping) throw new Error("Descriptor startup was stopped");
         if (occupied) throw new Error(`Descriptor endpoint ${this.config.modelUrl} is already occupied; refusing to adopt an unmanaged server`);
 
+        await pruneStaleMedia(this.config.mediaDirectory).catch(() => undefined);
         const args = [
             "-m", this.config.modelPath,
             "--mmproj", this.config.projectorPath,
@@ -82,6 +128,7 @@ export class LlamaServer {
             "--flash-attn", "on",
             "--cache-type-k", "f16",
             "--cache-type-v", "f16",
+            "--cache-ram", "0",
             "--image-max-tokens", "70",
             "-np", "1",
             "--host", "127.0.0.1",

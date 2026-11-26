@@ -4,7 +4,7 @@ After=network.target video-server.service video-xvfb.service
 
 [Service]
 Type=simple
-Environment=PATH={{HOME}}/.nvm/versions/node/v22.19.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH={{HOME}}/.nvm/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=DISPLAY=:111
 Environment=VIDEO_PIPELINE_SERVICE_MODE=1
 Environment=VIDEO_PIPELINE_NETWORK_UPLOADS=1
@@ -12,7 +12,7 @@ Environment=VIDEO_PIPELINE_CLEANUP=1
 # The prebuilt dist, like every other service: a deploy is an explicit build (sdk, shared,
 # plug-ins, then pipeline), never a side effect of a restart after a merge.
 WorkingDirectory={{HOME}}/Documents/work/video/video-platform/packages/pipeline
-ExecStart={{HOME}}/.nvm/versions/node/v22.19.0/bin/node --no-warnings dist/main.js campaign-worker
+ExecStart={{HOME}}/.nvm/current/bin/node --no-warnings dist/main.js campaign-worker
 Restart=on-failure
 RestartSec=5
 

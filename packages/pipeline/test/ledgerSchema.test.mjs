@@ -157,38 +157,38 @@ test("two processes creating the same ledger at once end with one ledger", async
 });
 
 test("a schema other than this one and the one before is refused and left untouched", async (t) => {
-    for (const version of [16, 19]) {
+    for (const version of [17, 20]) {
         const { databasePath } = await ledger(t);
         const raw = new DatabaseSync(databasePath);
         raw.exec(`UPDATE schema_version SET version = ${version}`);
         raw.close();
         const before = contents(databasePath);
-        assert.throws(() => new PipelineDatabase(databasePath), new RegExp(`schema ${version}: this release opens schema 18 and upgrades schema 17 only`));
+        assert.throws(() => new PipelineDatabase(databasePath), new RegExp(`schema ${version}: this release opens schema 19 and upgrades schema 18 only`));
         assert.deepEqual(contents(databasePath), before);
     }
 });
 
-// A schema-17 ledger as the release before this one created it, with an upload history.
-const SCHEMA_17 = readFileSync(new URL("./fixtures/ledger-schema-17.sql", import.meta.url), "utf8");
-async function ledger17(t) {
+// A schema-18 ledger as the release before this one created it, with an upload history.
+const SCHEMA_18 = readFileSync(new URL("./fixtures/ledger-schema-18.sql", import.meta.url), "utf8");
+async function ledger18(t) {
     const { directory, databasePath, sitesFile } = await setting(t);
     const raw = new DatabaseSync(databasePath);
     raw.exec("PRAGMA journal_mode = WAL");
-    raw.exec(SCHEMA_17);
+    raw.exec(SCHEMA_18);
     raw.exec(`
-        INSERT INTO schema_version VALUES (17);
-        INSERT INTO campaign_control (id, state, provider_filter, ordering, monthly_upload_limit_bytes, updated_at, upload_provider)
-            VALUES (1, 'running', 'all', 'oldest', 700000000000, '2026-11-01T00:00:00.000Z', 'form-host');
+        INSERT INTO schema_version VALUES (18);
+        INSERT INTO campaign_control (id, state, provider_filter, ordering, daily_upload_limit_bytes, updated_at, upload_provider)
+            VALUES (1, 'running', 'all', 'oldest', 25000000000, '2026-11-01T00:00:00.000Z', 'form-host');
         INSERT INTO production_version VALUES (1, 'production-v6', '2026-01-01T00:00:00.000Z');
         INSERT INTO recordings (id, provider, source_kind, source_path, playlist_path, source_fingerprint, duration_seconds,
             state, created_at, updated_at) VALUES ('r1', 'live-a', 'edited', '/x/2026-01-01 010000 a', '/x/p.m3u8', 'f', 60,
             'upload_uncertain', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
         INSERT INTO upload_reservations (id, recording_id, artifact_part, provider, calendar_month, reserved_bytes, status,
-            created_at, updated_at) VALUES ('res1', 'r1', 'full', 'form-host', '2026-11', 1000, 'released', '2026-11-02T00:00:00.000Z', '2026-11-02T00:00:00.000Z');
-        INSERT INTO upload_attempts (id, reservation_id, recording_id, provider, status, started_at)
-            VALUES ('att1', 'res1', 'r1', 'form-host', 'uncertain', '2026-11-02T00:00:00.000Z');
-        INSERT INTO bandwidth_events (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
-            VALUES ('r1', 'att1', 'form-host', '2026-11', 900, '2026-11-02T00:00:00.000Z');
+            created_at, updated_at, uplink) VALUES ('res1', 'r1', 'full', 'form-host', '2026-11', 1000, 'released', '2026-11-02T00:00:00.000Z', '2026-11-02T00:00:00.000Z', 'home');
+        INSERT INTO upload_attempts (id, reservation_id, recording_id, provider, status, started_at, uplink)
+            VALUES ('att1', 'res1', 'r1', 'form-host', 'uncertain', '2026-11-02T00:00:00.000Z', 'home');
+        INSERT INTO bandwidth_events (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at, uplink)
+            VALUES ('r1', 'att1', 'form-host', '2026-11', 900, '2026-11-02T00:00:00.000Z', 'home');
     `);
     raw.close();
     return { directory, databasePath, sitesFile };
@@ -206,10 +206,10 @@ function schema(databasePath) {
     } finally { database.close(); }
 }
 
-test("a schema-17 ledger is upgraded to the same schema a new ledger has, keeping its history", async (t) => {
+test("a schema-18 ledger is upgraded to the same schema a new ledger has, keeping its history", async (t) => {
     const fresh = await setting(t);
     new PipelineDatabase(fresh.databasePath).close();
-    const { databasePath } = await ledger17(t);
+    const { databasePath } = await ledger18(t);
     const database = new PipelineDatabase(databasePath);
     t.after(() => database.close());
     assert.deepEqual(schema(databasePath), schema(fresh.databasePath));
@@ -222,15 +222,15 @@ test("a schema-17 ledger is upgraded to the same schema a new ledger has, keepin
     t.after(() => raw.close());
     assert.equal(raw.prepare("SELECT uplink FROM upload_attempts WHERE id = 'att1'").get().uplink, "home");
     assert.equal(raw.prepare("SELECT uplink FROM upload_reservations WHERE id = 'res1'").get().uplink, "home");
-    assert.equal(raw.prepare("SELECT version FROM schema_version").get().version, 18);
+    assert.equal(raw.prepare("SELECT version FROM schema_version").get().version, 19);
     // Opening the upgraded ledger again changes nothing.
     const before = contents(databasePath);
     new PipelineDatabase(databasePath).close();
     assert.deepEqual(contents(databasePath), before);
 });
 
-test("SIGKILL in the middle of the upgrade leaves the schema-17 ledger; the next open upgrades it whole", async (t) => {
-    const { databasePath, sitesFile } = await ledger17(t);
+test("SIGKILL in the middle of the upgrade leaves the schema-18 ledger; the next open upgrades it whole", async (t) => {
+    const { databasePath, sitesFile } = await ledger18(t);
     const before = contents(databasePath);
     const child = spawn(process.execPath, ["--no-warnings", "--input-type=module", "-e", `
         import { writeSync } from "node:fs";
@@ -261,8 +261,8 @@ test("SIGKILL in the middle of the upgrade leaves the schema-17 ledger; the next
     assert.equal(database.integrityCheck(), "ok");
 });
 
-test("two processes opening a schema-17 ledger at once upgrade it once", async (t) => {
-    const { databasePath, sitesFile } = await ledger17(t);
+test("two processes opening a schema-18 ledger at once upgrade it once", async (t) => {
+    const { databasePath, sitesFile } = await ledger18(t);
     const open = () => spawn(process.execPath, ["--no-warnings", "--input-type=module", "-e", `
         const { PipelineDatabase } = await import(${JSON.stringify(MODULE)});
         const database = new PipelineDatabase(process.argv[1]);

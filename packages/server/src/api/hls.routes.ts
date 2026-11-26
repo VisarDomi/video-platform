@@ -42,12 +42,23 @@ router.get("/hls/:provider/:filename/:segmentName", async (req: Request, res) =>
     try {
         const ref = await utils.resolveVideo(filename, provider);
         const segmentPath = path.join(ref.dirPath, segmentName);
-
-        const data = await fs.readFile(segmentPath);
         const contentType = isMp4 ? API.HEADERS.MP4_CONTENT_TYPE : API.HEADERS.TS_CONTENT_TYPE;
+        const isLive = path.basename(path.dirname(ref.dirPath)) === ".active";
         res.setHeader(API.HEADERS.CONTENT_TYPE, contentType);
-        res.send(data);
-
+        res.setHeader("Cache-Control", isLive ? "no-cache" : "public, max-age=31536000, immutable");
+        res.sendFile(segmentPath, { dotfiles: "allow", acceptRanges: true, cacheControl: false }, (err: any) => {
+            if (!err || req.aborted || res.destroyed) return;
+            if (res.headersSent) {
+                res.destroy();
+                return;
+            }
+            if (err.code === MISC.ERROR_CODE.ENOENT || err.status === 404) {
+                res.status(404).send(API.MESSAGES.SEGMENT_NOT_FOUND);
+            } else {
+                logger.error(`Error serving segment ${segmentName}`, { error: err });
+                res.status(500).send(API.MESSAGES.COULD_NOT_SERVE_SEGMENT);
+            }
+        });
     } catch (err: any) {
         if (err.name === "FileNotFoundError" || err.code === MISC.ERROR_CODE.ENOENT) {
             if (!res.headersSent) res.status(404).send(API.MESSAGES.SEGMENT_NOT_FOUND);

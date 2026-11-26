@@ -73,10 +73,19 @@ router.get("/videos/changes", async (req, res) => {
     if (!knownProvider(provider)) return res.status(400).json({ error: `Unknown provider: ${provider}` });
     try {
         const since = req.query.since === undefined ? undefined : Number(req.query.since);
+        const safeSince = Number.isSafeInteger(since) ? since : undefined;
+        const epoch = req.query.epoch as string | undefined;
         const wait = Math.min(25, Math.max(0, Number(req.query.wait) || 0)) * 1000;
+        const index = libraryIndex(provider);
+        await index.start();
+        if (index.needsFullSnapshot(safeSince, epoch)) {
+            const encoded = await index.encodedFullChanges();
+            sendJSON(req, res, encoded.json, encoded.gzip);
+            return;
+        }
         let closed = false;
         req.on("close", () => { closed = true; });
-        const changes = await libraryIndex(provider).changes(Number.isSafeInteger(since) ? since : undefined, req.query.epoch as string | undefined, wait);
+        const changes = await index.changes(safeSince, epoch, wait);
         if (closed) return;
         sendJSON(req, res, Buffer.from(JSON.stringify(changes)));
     } catch (error: any) {

@@ -8,7 +8,7 @@ import { DEFAULT_DAILY_UPLOAD_BYTES } from "../domain/uploadBudget.js";
 // The ledger's schema. A new ledger is created whole, in one transaction, so a power cut
 // leaves either no ledger or a complete one. A ledger one schema older is upgraded in one
 // transaction when it is opened; any other schema is refused.
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 // Production artifact parts: "full", the 1080p split's names, or "shapeN" (one upload
 // per picture shape). Kept in SQL so a bad name cannot be stored.
@@ -64,6 +64,25 @@ const UPLINK_SQL = `
         failures INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0),
         updated_at TEXT NOT NULL
     ) STRICT;
+`;
+
+// Schema 19: hot-path indexes for state history, upload attempts/receipts, budget accounting,
+// confirmations, and active leases (eliminating full-table scans on every dashboard refresh
+// and worker step).
+const PERFORMANCE_INDEXES_SQL = `
+    CREATE INDEX IF NOT EXISTS state_events_recording_idx ON state_events (recording_id, id);
+    CREATE INDEX IF NOT EXISTS state_events_created_idx ON state_events (created_at);
+    CREATE INDEX IF NOT EXISTS upload_attempts_recording_idx ON upload_attempts (recording_id, started_at);
+    CREATE INDEX IF NOT EXISTS upload_attempts_status_idx ON upload_attempts (status, started_at);
+    CREATE INDEX IF NOT EXISTS upload_artifact_receipts_recording_idx ON upload_artifact_receipts (recording_id);
+    CREATE INDEX IF NOT EXISTS upload_artifact_receipts_pending_cleanup_idx
+        ON upload_artifact_receipts (verify_after) WHERE accepted_at IS NOT NULL AND deleted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS upload_reservations_budget_idx
+        ON upload_reservations (uplink, calendar_month, status);
+    CREATE INDEX IF NOT EXISTS bandwidth_events_month_idx ON bandwidth_events (uplink, calendar_month);
+    CREATE INDEX IF NOT EXISTS bandwidth_events_created_idx ON bandwidth_events (uplink, created_at);
+    CREATE INDEX IF NOT EXISTS upload_confirmations_recording_idx ON upload_confirmations (recording_id);
+    CREATE INDEX IF NOT EXISTS recordings_lease_idx ON recordings (lease_owner) WHERE lease_owner IS NOT NULL;
 `;
 
 const LEDGER_SQL = `
@@ -462,7 +481,8 @@ const LEDGER_SQL = `
         retired_at TEXT NOT NULL,
         PRIMARY KEY (production_version, recording_id, artifact_part)
     ) STRICT;
-${UPLINK_SQL}`;
+${UPLINK_SQL}
+${PERFORMANCE_INDEXES_SQL}`;
 
 // The destination a new ledger's campaign starts with: the sites file's first.
 export function initialDestination(): string {
@@ -490,17 +510,10 @@ export function createLedger(database: DatabaseSync, destination: string, now = 
 
 // The upgrade from the schema before this one. The caller holds a write transaction and
 // has read that schema's version inside it, so a power cut leaves the old ledger or the
-// new one, never a mix. Schema 17 to 18: home's allowance becomes a daily amount, every
-// reservation, attempt and billed byte names its uplink, and the second uplink's tables.
-export const UPGRADABLE_SCHEMA_VERSION = 17;
+// new one, never a mix. Schema 18 to 19: add hot-path indexes for state events, upload
+// attempts, receipts, reservations, bandwidth accounting, confirmations, and active leases.
+export const UPGRADABLE_SCHEMA_VERSION = 18;
 export function upgradeLedger(database: DatabaseSync): void {
-    database.exec(`
-        ALTER TABLE campaign_control RENAME COLUMN monthly_upload_limit_bytes TO daily_upload_limit_bytes;
-        ALTER TABLE upload_reservations ADD COLUMN uplink TEXT NOT NULL DEFAULT 'home';
-        ALTER TABLE upload_attempts ADD COLUMN uplink TEXT NOT NULL DEFAULT 'home';
-        ALTER TABLE bandwidth_events ADD COLUMN uplink TEXT NOT NULL DEFAULT 'home';
-        ${UPLINK_SQL}
-    `);
-    database.prepare("UPDATE campaign_control SET daily_upload_limit_bytes = ? WHERE id = 1").run(DEFAULT_DAILY_UPLOAD_BYTES);
+    database.exec(PERFORMANCE_INDEXES_SQL);
     database.prepare("UPDATE schema_version SET version = ?").run(SCHEMA_VERSION);
 }

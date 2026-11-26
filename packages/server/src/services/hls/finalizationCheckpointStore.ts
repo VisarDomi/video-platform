@@ -17,12 +17,17 @@ export class FinalizationCheckpointStore {
             PRAGMA busy_timeout = 5000;
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = FULL;
+            PRAGMA cache_size = -16000;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA wal_autocheckpoint = 1000;
             CREATE TABLE IF NOT EXISTS integrity_checkpoints (
                 recording_path TEXT PRIMARY KEY,
                 playlist_fingerprint TEXT NOT NULL,
                 report_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             ) STRICT;
+            CREATE INDEX IF NOT EXISTS integrity_checkpoints_updated_idx
+                ON integrity_checkpoints (updated_at);
             CREATE TABLE IF NOT EXISTS finalization_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -150,6 +155,57 @@ export class FinalizationCheckpointStore {
         } catch {
             return null;
         }
+    }
+
+    // Compacts legacy v1 published fmp4 capture journals (which stored full playlists and
+    // per-segment source hashes, ~500 KB - 1 MB each) into compact v2 published receipts
+    // (~300 bytes) and removes stale checkpoints for paths that no longer exist on disk.
+    compact(pathExists?: (recordingPath: string) => boolean, vacuum = false): { compactedJournals: number; prunedCheckpoints: number } {
+        let compactedJournals = 0;
+        let prunedCheckpoints = 0;
+        const now = new Date().toISOString();
+        this.database.exec("BEGIN IMMEDIATE");
+        try {
+            const updateMeta = this.database.prepare("UPDATE finalization_meta SET value = ?, updated_at = ? WHERE key = ?");
+            const rows = this.database.prepare("SELECT key, value FROM finalization_meta WHERE key LIKE 'lossless-fmp4-capture-v1:%'").all() as Array<{ key: string; value: string }>;
+            for (const row of rows) {
+                try {
+                    const parsed = JSON.parse(row.value) as Record<string, unknown>;
+                    if (parsed.version === 1 && parsed.phase === "published" && typeof parsed.candidatePlaylist === "string") {
+                        const compact = {
+                            version: 2,
+                            phase: "published",
+                            candidatePlaylistSha: createHash("sha256").update(parsed.candidatePlaylist).digest("hex"),
+                            outputs: parsed.outputs ?? [],
+                            preservedNames: parsed.preservedNames ?? [],
+                            splitNames: parsed.splitNames ?? [],
+                            corrections: parsed.corrections ?? 0,
+                            ...(Array.isArray(parsed.mapCorrections) && parsed.mapCorrections.length ? { mapCorrections: parsed.mapCorrections } : {}),
+                        };
+                        updateMeta.run(JSON.stringify(compact), now, row.key);
+                        compactedJournals += 1;
+                    }
+                } catch {}
+            }
+            if (pathExists) {
+                const del = this.database.prepare("DELETE FROM integrity_checkpoints WHERE recording_path = ?");
+                const checkpoints = this.database.prepare("SELECT recording_path FROM integrity_checkpoints").all() as Array<{ recording_path: string }>;
+                for (const { recording_path } of checkpoints) {
+                    if (!pathExists(recording_path)) {
+                        del.run(recording_path);
+                        prunedCheckpoints += 1;
+                    }
+                }
+            }
+            this.database.exec("COMMIT");
+        } catch (error) {
+            this.database.exec("ROLLBACK");
+            throw error;
+        }
+        if (vacuum) {
+            this.database.exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
+        }
+        return { compactedJournals, prunedCheckpoints };
     }
 
     close(): void {

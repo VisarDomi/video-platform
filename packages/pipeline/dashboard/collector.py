@@ -422,17 +422,36 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         short_waiting = [identity(row) for row in records if row["state"] == "short_waiting"]
         since = (now - timedelta(days=13)).astimezone(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
         utc = lambda date: date.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        aggregate = """SELECT
-            SUM(CASE WHEN from_state='uploading' AND to_state='upload_uncertain' AND reason LIKE 'metadata submitted;%' THEN 1 ELSE 0 END) submitted,
-            SUM(CASE WHEN to_state='upload_verified' THEN 1 ELSE 0 END) verified,
-            SUM(CASE WHEN to_state='remuxed' THEN 1 ELSE 0 END) converted
-            FROM state_events WHERE created_at>=? AND created_at<?"""
-        days = {}
-        for i in range(14):
-            begin = since + timedelta(days=i)
-            counts_for_day = dict(db.execute(aggregate, (utc(begin), utc(begin + timedelta(days=1)))).fetchone())
-            days[begin.date().isoformat()] = {key: counts_for_day[key] or 0 for key in ("submitted", "verified")}
-        totals24 = {key: value or 0 for key, value in dict(db.execute(aggregate, (utc(now-timedelta(hours=24)), utc(now+timedelta(milliseconds=1)))).fetchone()).items()}
+        cutoff_24h = now - timedelta(hours=24)
+        days = {(since + timedelta(days=i)).date().isoformat(): {"submitted": 0, "verified": 0} for i in range(14)}
+        totals24 = {"submitted": 0, "verified": 0, "converted": 0}
+        window_start = utc(min(since.astimezone(timezone.utc), cutoff_24h))
+        window_end = utc(now + timedelta(milliseconds=1))
+        for from_state, to_state, reason, created_at in db.execute(
+            "SELECT from_state, to_state, reason, created_at FROM state_events WHERE created_at>=? AND created_at<?",
+            (window_start, window_end),
+        ):
+            at = stamp(created_at)
+            if not at:
+                continue
+            submitted = from_state == "uploading" and to_state == "upload_uncertain" and (reason or "").startswith("metadata submitted;")
+            verified = to_state == "upload_verified"
+            converted = to_state == "remuxed"
+            if not (submitted or verified or converted):
+                continue
+            bucket = days.get(at.astimezone(TZ).date().isoformat())
+            if bucket is not None:
+                if submitted:
+                    bucket["submitted"] += 1
+                if verified:
+                    bucket["verified"] += 1
+            if at >= cutoff_24h:
+                if submitted:
+                    totals24["submitted"] += 1
+                if verified:
+                    totals24["verified"] += 1
+                if converted:
+                    totals24["converted"] += 1
         events = [dict(r) for r in db.execute("""SELECT recording_id,from_state,to_state,reason,created_at FROM state_events
             WHERE created_at>=? AND from_state IS NOT to_state ORDER BY id DESC LIMIT 50""", (utc(since),))]
         activity = []

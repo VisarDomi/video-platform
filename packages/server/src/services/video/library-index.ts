@@ -48,6 +48,20 @@ const EPOCH = randomUUID();
 const SAFETY_RESCAN_MS = 30_000;
 const ACTIVE_RESCAN_MS = 2_000;
 const DEBOUNCE_MS = 150;
+const RECONCILE_CONCURRENCY = 64;
+
+async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) {
+            const index = next++;
+            results[index] = await fn(items[index]);
+        }
+    });
+    await Promise.all(workers);
+    return results;
+}
 
 export function key(filename: string, type: string): string { return filename + "\u001f" + type; }
 
@@ -77,12 +91,15 @@ export class ProviderIndex {
     private revision = 0;
     private changeLog: Change[] = [];
     private encoded: { revision: number; json: Buffer; gzip: Buffer } | null = null;
+    private encodedFullChangeSet: { revision: number; json: Buffer; gzip: Buffer } | null = null;
     private waiters = new Set<() => void>();
     private watchers: FSWatcher[] = [];
     private timers: NodeJS.Timeout[] = [];
     private pending: NodeJS.Timeout | null = null;
     private reconciling: Promise<void> = Promise.resolve();
     private saveTimer: NodeJS.Timeout | null = null;
+    private saving: Promise<void> | null = null;
+    private saveQueued = false;
     private started: Promise<void> | null = null;
     private closed = false;
     private sizing = new Set<string>();
@@ -127,7 +144,10 @@ export class ProviderIndex {
         if (this.saveTimer) {
             clearTimeout(this.saveTimer);
             this.saveTimer = null;
-            await this.save();
+            this.saveQueued = true;
+        }
+        if (this.saving || this.saveQueued) {
+            await this.flushSaves();
         }
     }
 
@@ -148,11 +168,29 @@ export class ProviderIndex {
         return this.encoded;
     }
 
+    // The full-list ChangeSet returned to new or stale clients, encoded and gzipped once
+    // per revision so cold app opens avoid per-request JSON serialization and gzip on the
+    // event loop.
+    async encodedFullChanges(): Promise<{ revision: number; json: Buffer; gzip: Buffer }> {
+        await this.start();
+        if (this.encodedFullChangeSet?.revision !== this.revision) {
+            const json = Buffer.from(JSON.stringify({ epoch: EPOCH, revision: this.revision, videos: this.sorted() }));
+            this.encodedFullChangeSet = { revision: this.revision, json, gzip: zlib.gzipSync(json) };
+        }
+        return this.encodedFullChangeSet;
+    }
+
+    // Whether `changes(since, epoch)` would return the full list rather than an incremental delta.
+    needsFullSnapshot(since: number | undefined, epoch: string | undefined): boolean {
+        return since === undefined || epoch !== EPOCH || since > this.revision
+            || (this.changeLog[0] !== undefined && since < this.changeLog[0].revision - 1)
+            || (!this.changeLog.length && since < this.revision);
+    }
+
     // What changed after `since` (of `epoch`); waits up to `waitMs` for a change when nothing has.
     async changes(since: number | undefined, epoch: string | undefined, waitMs = 0): Promise<ChangeSet> {
         await this.start();
-        if (since === undefined || epoch !== EPOCH || since > this.revision || (this.changeLog[0] && since < this.changeLog[0].revision - 1)
-            || (!this.changeLog.length && since < this.revision)) {
+        if (since === undefined || this.needsFullSnapshot(since, epoch)) {
             return { epoch: EPOCH, revision: this.revision, videos: this.sorted() };
         }
         if (since === this.revision && waitMs > 0) {
@@ -184,23 +222,39 @@ export class ProviderIndex {
     }
 
     private scheduleSave(): void {
+        this.saveQueued = true;
         if (this.saveTimer) return;
         this.saveTimer = setTimeout(() => {
             this.saveTimer = null;
-            void this.save();
+            void this.flushSaves();
         }, 1000);
         this.saveTimer.unref();
     }
 
+    private flushSaves(): Promise<void> {
+        if (this.saving) return this.saving;
+        this.saving = (async () => {
+            while (this.saveQueued) {
+                this.saveQueued = false;
+                await this.save();
+            }
+        })().finally(() => {
+            this.saving = null;
+            if (this.saveQueued && !this.closed) this.scheduleSave();
+        });
+        return this.saving;
+    }
+
     private async save(): Promise<void> {
         const data = JSON.stringify({ revision: this.revision, entries: [...this.entries.values()] });
-        const temporary = this.stateFile + ".tmp";
+        const temporary = `${this.stateFile}.${randomUUID()}.tmp`;
         try {
             await fs.mkdir(path.dirname(this.stateFile), { recursive: true });
-            const handle = await fs.open(temporary, "w");
+            const handle = await fs.open(temporary, "wx", 0o600);
             try { await handle.writeFile(data); await handle.sync(); } finally { await handle.close(); }
             await fs.rename(temporary, this.stateFile);
         } catch (error) {
+            await fs.unlink(temporary).catch(() => undefined);
             logger.warn(`[list-index] ${this.provider}: could not save`, { error });
         }
     }
@@ -247,10 +301,10 @@ export class ProviderIndex {
                 names = (await fs.readdir(this.dirs[kind], { withFileTypes: true }))
                     .filter(entry => entry.isDirectory() && !entry.name.startsWith(".")).map(entry => entry.name);
             } catch { continue; }
-            await Promise.all(names.map(async name => {
+            await mapBounded(names, RECONCILE_CONCURRENCY, async name => {
                 const entry = await this.read(kind, name);
                 if (entry) found.set(key(entry.filename, entry.type), entry);
-            }));
+            });
         }
         let changed = false;
         for (const [entryKey, entry] of found) {
@@ -331,6 +385,7 @@ export class ProviderIndex {
         this.changeLog.push({ revision: this.revision, ...change });
         if (this.changeLog.length > KEEP_CHANGES) this.changeLog.splice(0, this.changeLog.length - KEEP_CHANGES);
         this.encoded = null;
+        this.encodedFullChangeSet = null;
     }
 }
 

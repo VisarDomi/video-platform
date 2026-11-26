@@ -14,6 +14,26 @@ interface Journal {
     version: 1; phase: "prepared" | "published"; originalPlaylist: string; candidatePlaylist: string;
     sources: Source[]; outputs: Output[]; preservedNames: string[]; splitNames: string[]; corrections: number; mapCorrections?: string[];
 }
+// Published journals no longer need full playlist text or source-segment hashes (which ran
+// 500 KB - 1 MB per recording). Keeping only the candidate playlist SHA-256 and output
+// receipts preserves full post-publication verification in ~300 bytes.
+interface CompactPublishedJournal {
+    version: 2; phase: "published"; candidatePlaylistSha: string;
+    outputs: Output[]; preservedNames: string[]; splitNames: string[]; corrections: number; mapCorrections?: string[];
+}
+type StoredJournal = Journal | CompactPublishedJournal;
+function compactPublished(journal: Journal): CompactPublishedJournal {
+    return {
+        version: 2,
+        phase: "published",
+        candidatePlaylistSha: hash(journal.candidatePlaylist),
+        outputs: journal.outputs,
+        preservedNames: journal.preservedNames,
+        splitNames: journal.splitNames,
+        corrections: journal.corrections,
+        ...(journal.mapCorrections?.length ? { mapCorrections: journal.mapCorrections } : {}),
+    };
+}
 export interface Fmp4CaptureResult { warnings: MediaIntegrityWarning[]; preservedNames: string[]; changed: boolean }
 const unchanged = (): Fmp4CaptureResult => ({ warnings: [], preservedNames: [], changed: false });
 function journalKey(folder: string): string {
@@ -38,13 +58,13 @@ async function exclusive(folder: string, name: string, bytes: Buffer): Promise<v
     } finally { await fs.unlink(temporary).catch(() => undefined); }
 }
 
-function finding(journal: Journal): MediaIntegrityWarning[] {
+function finding(journal: Pick<StoredJournal, "splitNames" | "mapCorrections">): MediaIntegrityWarning[] {
     const names = [...new Set([...journal.splitNames, ...(journal.mapCorrections ?? [])])];
     if (!names.length) return [];
     return [{ kind: "decoder-boundary-split", names,
         message: `aligned ${names.length} AVC fragment(s) with captured decoder configurations; losslessly split ${journal.splitNames.length} mixed fragment(s); original files retained` }];
 }
-async function verifyOutputs(folder: string, journal: Journal): Promise<void> {
+async function verifyOutputs(folder: string, journal: Pick<StoredJournal, "outputs">): Promise<void> {
     for (const file of journal.outputs) {
         if (hash(await fs.readFile(path.join(folder, file.name))) !== file.sha) throw new Error("Published split output is missing or changed");
     }
@@ -73,11 +93,18 @@ export async function finalizeFmp4Capture(folder: string, store?: FinalizationCh
     if (!store) return unchanged();
     const playlistPath = path.join(folder, "playlist.m3u8"), text = await fs.readFile(playlistPath, "utf8");
     if (!text.includes("#EXT-X-MAP:") || !text.split(/\r?\n/).includes("#EXT-X-ENDLIST")) return unchanged();
-    const key = journalKey(folder), old = store.getMeta<Journal>(key);
+    const key = journalKey(folder), old = store.getMeta<StoredJournal>(key);
     if (old) {
+        if (old.version === 2) {
+            if (hash(text) === old.candidatePlaylistSha) {
+                await verifyOutputs(folder, old);
+                return { warnings: finding(old), preservedNames: old.preservedNames, changed: false };
+            }
+            return { ...unchanged(), warnings: [{ kind: "decoder-boundary-unrepaired", message: "Playlist changed after a lossless capture repair; left unchanged" }] };
+        }
         if (text === old.candidatePlaylist) {
             await verifyOutputs(folder, old);
-            if (old.phase !== "published") store.setMeta(key, { ...old, phase: "published" });
+            store.setMeta(key, compactPublished(old));
             return { warnings: finding(old), preservedNames: old.preservedNames, changed: false };
         }
         if (text !== old.originalPlaylist) return { ...unchanged(), warnings: [{ kind: "decoder-boundary-unrepaired", message: "Playlist changed after a lossless capture repair; left unchanged" }] };
@@ -219,6 +246,6 @@ export async function finalizeFmp4Capture(folder: string, store?: FinalizationCh
     const temporary = path.join(folder, `.playlist-${randomUUID()}.tmp`), handle = await fs.open(temporary, "wx", 0o600);
     try { await handle.writeFile(candidate); await handle.sync(); } finally { await handle.close(); }
     await fs.rename(temporary, playlistPath); await syncDirectory(folder);
-    store.setMeta(key, { ...journal, phase: "published" });
+    store.setMeta(key, compactPublished(journal));
     return { warnings: finding(journal), preservedNames: journal.preservedNames, changed: true };
 }

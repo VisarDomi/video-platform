@@ -1,0 +1,10 @@
+[Unit]
+Description=Interactive local video server and playback resource slice
+
+[Slice]
+CPUWeight=1000
+IOWeight=500
+MemoryLow=1G
+MemoryHigh=4G
+MemoryMax=6G
+MemorySwapMax=0

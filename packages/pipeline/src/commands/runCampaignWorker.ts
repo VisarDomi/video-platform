@@ -175,23 +175,20 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     if (partials.length > 0) console.log(JSON.stringify({ event: "campaign-boot-clear-partials", removed: partials }));
     // Heartbeat on its own timer so manual *-one commands can tell the
     // campaign is alive even mid-step (a single step can take minutes).
+    // Reuse one lightweight connection instead of re-opening the ledger every 30 s.
+    const heartbeatDatabase = new PipelineDatabase(config.databasePath);
+    heartbeatDatabase.writeWorkerHeartbeat();
     const heartbeat = setInterval(() => {
-        const database = new PipelineDatabase(config.databasePath);
         try {
-            database.writeWorkerHeartbeat();
-        } finally {
-            database.close();
+            heartbeatDatabase.writeWorkerHeartbeat();
+        } catch (error) {
+            console.error(journalPriority("warn") + JSON.stringify({ event: "worker-heartbeat-error", error: String(error) }));
         }
     }, 30_000);
-    {
-        const database = new PipelineDatabase(config.databasePath);
-        try {
-            database.writeWorkerHeartbeat();
-        } finally {
-            database.close();
-        }
-    }
-    signal.addEventListener("abort", () => clearInterval(heartbeat), { once: true });
+    signal.addEventListener("abort", () => {
+        clearInterval(heartbeat);
+        try { heartbeatDatabase.close(); } catch {}
+    }, { once: true });
     let keepingAlive = false;
     const keepalive = () => {
         if (keepingAlive || signal.aborted) return;

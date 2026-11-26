@@ -232,6 +232,9 @@ export class PipelineDatabase {
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = FULL;
             PRAGMA foreign_keys = ON;
+            PRAGMA cache_size = -16000;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA wal_autocheckpoint = 1000;
         `);
         // A new ledger is created whole, in one transaction (another process may be
         // creating it at the same moment: the second one finds it done).
@@ -2835,6 +2838,14 @@ export class PipelineDatabase {
             VALUES (?, ?, ?, ?, ?, ?, ?)`).run(event.provider, now.toISOString(), event.kind,
             event.loggedIn === undefined || event.loggedIn === null ? null : event.loggedIn ? 1 : 0,
             event.fingerprint ?? null, event.passwordLoginAt ?? null, event.note ?? null);
+        // Bound routine healthy keepalive rows to 30 days while keeping every failure,
+        // recovery, and logged-out transition event permanently.
+        if (event.kind === "keepalive" && event.loggedIn === true) {
+            const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60_000).toISOString();
+            this.database.prepare(`DELETE FROM provider_session_events
+                WHERE provider = ? AND kind = 'keepalive' AND logged_in = 1 AND occurred_at < ?`)
+                .run(event.provider, cutoff);
+        }
     }
 
     listProviderSessionEvents(provider: ActiveUploadProvider, sinceIso = "0000"): Array<{

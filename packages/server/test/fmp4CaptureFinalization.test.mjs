@@ -68,8 +68,8 @@ test('default finalization splits an in-moof AVC transition and retains every or
   assert.ok(!result.report.warnings.some(w=>w.kind==='unreferenced-media'));
   const {DatabaseSync}=await import('node:sqlite'); const db=new DatabaseSync(f.db,{readOnly:true});
   const rows=db.prepare('SELECT value FROM finalization_meta').all(); db.close();
-  const j=JSON.parse(rows.find(r=>JSON.parse(r.value).candidatePlaylist===text).value);
-  assert.equal(j.originalPlaylist,f.playlist); assert.equal(j.phase,'published');
+  const j=JSON.parse(rows.find(r=>JSON.parse(r.value).candidatePlaylistSha===hash(text)).value);
+  assert.equal(j.version,2); assert.equal(j.phase,'published'); assert.equal(j.originalPlaylist,undefined); assert.equal(j.sources,undefined);
   const before=await readdir(f.folder); const again=await finalizeFmp4Capture(f.folder,f.store);
   assert.equal(again.changed,false); assert.deepEqual(await readdir(f.folder),before);
   assert.equal(await readFile(path.join(f.folder,'playlist.m3u8'),'utf8'),text);

@@ -15,10 +15,19 @@ interface ChatCompletionResponse {
     timings?: Record<string, unknown>;
 }
 
-export function postJson(url: URL, body: unknown): Promise<{ status: number; body: ChatCompletionResponse }> {
+const DEFAULT_REQUEST_TIMEOUT_MS = Number.parseInt(process.env.DESCRIPTOR_REQUEST_TIMEOUT_MS ?? String(25 * 60_000), 10);
+
+export function postJson(url: URL, body: unknown, timeoutMilliseconds = DEFAULT_REQUEST_TIMEOUT_MS): Promise<{ status: number; body: ChatCompletionResponse }> {
     return new Promise((resolve, reject) => {
         const payload = JSON.stringify(body);
         const transport = url.protocol === "https:" ? https : http;
+        let settled = false;
+        const finish = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
+            if (timer) clearTimeout(timer);
+            fn();
+        };
         const request = transport.request(url, {
             method: "POST",
             headers: {
@@ -29,20 +38,27 @@ export function postJson(url: URL, body: unknown): Promise<{ status: number; bod
             let responseBody = "";
             response.setEncoding("utf8");
             response.on("data", (chunk: string) => { responseBody += chunk; });
-            response.on("error", reject);
-            response.on("aborted", () => reject(new Error("Model response was interrupted")));
+            response.on("error", (error) => finish(() => reject(error)));
+            response.on("aborted", () => finish(() => reject(new Error("Model response was interrupted"))));
             response.on("end", () => {
                 try {
-                    resolve({
+                    const parsed = JSON.parse(responseBody) as ChatCompletionResponse;
+                    finish(() => resolve({
                         status: response.statusCode ?? 0,
-                        body: JSON.parse(responseBody) as ChatCompletionResponse,
-                    });
+                        body: parsed,
+                    }));
                 } catch (error) {
-                    reject(new Error(`Model returned invalid JSON: ${responseBody.slice(0, 500)}`, { cause: error }));
+                    finish(() => reject(new Error(`Model returned invalid JSON: ${responseBody.slice(0, 500)}`, { cause: error })));
                 }
             });
         });
-        request.on("error", reject);
+        const timer = Number.isFinite(timeoutMilliseconds) && timeoutMilliseconds > 0
+            ? setTimeout(() => {
+                request.destroy(new Error(`Model request timed out after ${Math.round(timeoutMilliseconds / 1000)}s`));
+            }, timeoutMilliseconds)
+            : null;
+        timer?.unref?.();
+        request.on("error", (error) => finish(() => reject(error)));
         request.end(payload);
     });
 }
@@ -76,6 +92,7 @@ export async function requestDescription(videoUrl: string, fps: number, prompt: 
         }],
         temperature: 0.2,
         max_tokens: 512,
+        cache_prompt: false,
         reasoning_effort: "none",
         chat_template_kwargs: { enable_thinking: false },
         response_format: descriptionResponseFormat(),
