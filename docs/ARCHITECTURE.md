@@ -42,8 +42,11 @@ each one is tested. Every claim names the code or the command that holds it.
    prompt), joining short pieces, upload, and verification a day later. Its campaign
    worker runs, under a daily byte allowance per network, either one step at a time or (with
    a second uplink) three lanes at once: conversion on the CPU, description on the GPU and
-   upload on the network, each taking the oldest recording waiting for its stage. It deletes an original
-   only when every upload covering it has been verified online, and keeps the receipts.
+   upload on the network, each taking the oldest recording waiting for its stage. It never
+   deletes an original: it deletes a conversion once the destination accepted its upload
+   and the file still matches its receipt, and keeps the receipts. Once every upload
+   covering a recording has been verified online, a person can move the original to the
+   Desktop with `move-recordings` and delete it there.
 6. **The destination plug-in** speaks the upload site's protocol: sign in, transfer, create
    the video, list the account's uploads, and probe one. The core owns everything that
    must not go wrong around it: attempts, reservations, retries, verification, removal

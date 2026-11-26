@@ -46,7 +46,8 @@ Settings, in `video-platform-demo.yaml`:
 - `DEMO_CERT_HOSTS`: more names or addresses for the certificate, e.g. the PC's LAN address
   so a phone can open the website. Or mount a certificate the phone already trusts at
   `/demo/home/.local/share/mkcert/pwa` (`cert.pem`, `key.pem`).
-- `DEMO_CLEANUP=1`: let the pipeline delete recordings once their upload is verified.
+- `DEMO_CLEANUP=1`: let the pipeline delete a conversion once the destination accepted its
+  upload and the file still matches its receipt. It never deletes an original.
 - A folder of videos mounted at `/media` (commented out in the YAML).
 - The container is limited to two CPUs and 4 GiB.
 
