@@ -10,13 +10,18 @@ const ASSETS=new URL('../../pipeline/dashboard/web/',import.meta.url);
 const engines=[['Chromium',chromium,{executablePath:process.env.VIDEO_CHROMIUM_PATH??'/usr/bin/chromium'}],
  ...(process.env.WEBKIT_EXECUTABLE_PATH?[['WebKit',webkit,{executablePath:process.env.WEBKIT_EXECUTABLE_PATH}]]:[])];
 
+const UPLOAD='.lane[data-lane="upload"]';
+
 function fixture(){
  const now=new Date().toISOString();
  const service={state:'active',cpu_percent:.4,anonymous_bytes:70000000,uptime_seconds:3600};
  return {generated_at:now,fresh:true,campaign:{state:'running',resume_at:null,worker_heartbeat:now,step:null},
   health:{attention:0,historical_removals:9,alerts:[]},
   counts:{verified:123,ready:2,short_waiting:1,prepared_batches:1,confirming:1,capturing:1,submitted:7,receipts_verified:3,converted:8},
-  active:{id:'2026-01-01 010000 fixture-active',alias:'fixture-active',source_path:'/data/downloads/live-a/edited/2026-01-01 010000 fixture-active-with-a-very-long-unbroken-streamer-name',generated_title:'A generated title for the active recording [2026-01-01 010000 fixture-active]',provider:'live-a',captured_at:'2026-01-01 010000',stage:'upload',state:'uploading',seconds:900,size_bytes:1000000000,started_at:now,reservation_month:'2026-11',progress:{acknowledged_bytes:250000000,total_bytes:1000000000,percent:25,bytes_per_second:500000,eta_seconds:1500,fresh:true,updated_at:now}},
+  parallel:true,
+  lanes:[{lane:'convert',job:{id:'2026-01-01 000500 fixture-convert',alias:'fixture-convert',source_path:'/data/downloads/live-b/edited/2026-01-01 000500 fixture-convert',generated_title:null,provider:'live-b',captured_at:'2026-01-01 000500',stage:'convert',state:'server_ready',seconds:1200,size_bytes:null,started_at:now,progress:null,output_bytes:300000000},step:null,waiting:1},
+    {lane:'describe',job:null,step:{disposition:'resource_wait',reason:'15.2 GiB available, below 16 GiB'},waiting:1},
+    {lane:'upload',job:{id:'2026-01-01 010000 fixture-active',alias:'fixture-active',source_path:'/data/downloads/live-a/edited/2026-01-01 010000 fixture-active-with-a-very-long-unbroken-streamer-name',generated_title:'A generated title for the active recording [2026-01-01 010000 fixture-active]',provider:'live-a',captured_at:'2026-01-01 010000',stage:'upload',state:'uploading',seconds:900,size_bytes:1000000000,started_at:now,reservation_month:'2026-11',progress:{acknowledged_bytes:250000000,total_bytes:1000000000,percent:25,bytes_per_second:500000,eta_seconds:1500,fresh:true,updated_at:now}},step:null,waiting:0}],
   captures:[{alias:'fixture-capture',provider:'live-c',segments:350,seconds:700,active:true}],finalization:{processing:0,completed24:6},
   queue:[{id:'2026-01-02 010000 fixture-next',alias:'fixture-next',source_path:'/data/downloads/live-a/edited/2026-01-02 010000 fixture-next',provider:'live-a',captured_at:'2026-01-02 010000',seconds:800,state:'server_ready',stage:'convert'},
     {id:'2026-01-03 010000 fixture-later',alias:'fixture-later',source_path:'/data/downloads/live-b/edited/2026-01-03 010000 fixture-later',provider:'live-b',captured_at:'2026-01-03 010000',seconds:900,state:'artifact_valid',stage:'describe'}],
@@ -60,10 +65,17 @@ for(const [name,engine,options] of engines){
   const f=await start(t,engine,options),p=f.page;
   for(const width of [320,390,430,1024]){await p.setViewportSize({width,height:844});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`no overflow at ${width}`);}
   await p.setViewportSize({width:390,height:844});
-  assert.equal(await p.locator('.stat strong').first().innerText(),'123');assert.equal(await p.locator('#progress-number').innerText(),'25.0%');
-  assert.equal(await p.locator('#now-source-path').innerText(),f.getData().active.source_path);
-  assert.equal(await p.locator('#now-generated-title').innerText(),f.getData().active.generated_title);
+  assert.equal(await p.locator('.stat strong').first().innerText(),'123');assert.equal(await p.locator(UPLOAD+' .lane-progress-number').innerText(),'25.0%');
+  assert.equal(await p.locator(UPLOAD+' .lane-path').innerText(),f.getData().lanes[2].job.source_path);
+  assert.equal(await p.locator(UPLOAD+' .lane-title').innerText(),f.getData().lanes[2].job.generated_title);
+  // Three lanes at once: each shows its own recording or why it waits.
+  assert.equal(await p.locator('.lane').count(),3);assert.equal(await p.locator('#now-title').innerText(),'Converting · Uploading');
+  assert.equal(await p.locator('.lane[data-lane="convert"] .lane-path').innerText(),f.getData().lanes[0].job.source_path);
+  assert.match(await p.locator('.lane[data-lane="convert"]').innerText(),/300\.0 MB written so far/);
+  assert.match(await p.locator('.lane[data-lane="describe"]').innerText(),/Waiting for resources[\s\S]*15\.2 GiB available/);
+  assert.equal(await p.locator('.pipe-node.active').count(),3);
   await p.getByRole('button',{name:/Queue$/}).click();
+  assert.match(await p.locator('#queue-list').innerText(),/Working · Converting[\s\S]*Working · Uploading/);
   assert.match(await p.locator('#queue-list').innerText(),/\/data\/downloads\/live-a\/edited\/2026-01-02 010000 fixture-next/);
   assert.match(await p.locator('#queue-list').innerText(),/Waiting · Convert/);
   await p.locator('#queue-search').fill('live-a/edited/2026-01-02');assert.equal(await p.locator('.queue-row').count(),1);
@@ -75,9 +87,9 @@ for(const [name,engine,options] of engines){
   await p.setViewportSize({width:390,height:844});
   await p.locator('.brand').click();assert.equal(await p.locator('#overview').isVisible(),true);
   await p.locator('#show-shorts').click();assert.match(await p.locator('#queue-list').innerText(),/\/data\/downloads\/live-a\/edited\/2026-01-02 030000 fixture-short/);
-  const changed=f.getData();changed.active.generated_title='<img src=x onerror="window.__unsafe=1">';changed.active.source_path='/recordings/<img src=x onerror="window.__unsafe=1">';changed.queue[0].source_path='/queue/<img src=x onerror="window.__unsafe=2">';changed.activity[0].source_path='/activity/<img src=x onerror="window.__unsafe=3">';f.setData(changed);await p.locator('#refresh').click();await p.waitForFunction(()=>document.querySelector('#now-generated-title').textContent.startsWith('<img'));
-  assert.equal(await p.evaluate(()=>window.__unsafe),undefined);assert.equal(await p.locator('#now-generated-title img,#now-source-path img,#queue-list img,#activity-list img').count(),0);
-  assert.equal(await p.locator('#now-source-path').innerText(),changed.active.source_path);
+  const changed=f.getData();changed.lanes[2].job.generated_title='<img src=x onerror="window.__unsafe=1">';changed.lanes[2].job.source_path='/recordings/<img src=x onerror="window.__unsafe=1">';changed.queue[0].source_path='/queue/<img src=x onerror="window.__unsafe=2">';changed.activity[0].source_path='/activity/<img src=x onerror="window.__unsafe=3">';f.setData(changed);await p.locator('#refresh').click();await p.waitForFunction(()=>document.querySelector('.lane[data-lane="upload"] .lane-title').textContent.startsWith('<img'));
+  assert.equal(await p.evaluate(()=>window.__unsafe),undefined);assert.equal(await p.locator('#lanes img,#queue-list img,#activity-list img').count(),0);
+  assert.equal(await p.locator(UPLOAD+' .lane-path').innerText(),changed.lanes[2].job.source_path);
   assert.deepEqual(f.errors,[]);
  });
  test(`${name}: offline reload preserves a clearly saved snapshot and reconnects`,async t=>{
@@ -86,10 +98,10 @@ for(const [name,engine,options] of engines){
   f.offline(true);await f.context.setOffline(true);await p.reload({waitUntil:'domcontentloaded'});
   await p.waitForFunction(()=>document.querySelector('#connection-label')?.textContent==='Saved');
   assert.equal(await p.locator('.stat strong').first().innerText(),'123');assert.match(await p.locator('#now-state').innerText(),/LAST SEEN/);assert.match(await p.locator('#health-label').innerText(),/Last known/);
-  assert.equal(await p.locator('#now-source-path').innerText(),f.getData().active.source_path);
-  assert.equal(await p.locator('#now-generated-title').innerText(),f.getData().active.generated_title);
-  const changed=f.getData();changed.active.progress.percent=50;changed.active.progress.acknowledged_bytes=500000000;f.setData(changed);f.offline(false);await f.context.setOffline(false);await p.evaluate(()=>window.dispatchEvent(new Event('online')));
-  await p.waitForFunction(()=>document.querySelector('#connection-label').textContent==='Live'&&document.querySelector('#progress-number').textContent==='50.0%');
+  assert.equal(await p.locator(UPLOAD+' .lane-path').innerText(),f.getData().lanes[2].job.source_path);
+  assert.equal(await p.locator(UPLOAD+' .lane-title').innerText(),f.getData().lanes[2].job.generated_title);
+  const changed=f.getData();changed.lanes[2].job.progress.percent=50;changed.lanes[2].job.progress.acknowledged_bytes=500000000;f.setData(changed);f.offline(false);await f.context.setOffline(false);await p.evaluate(()=>window.dispatchEvent(new Event('online')));
+  await p.waitForFunction(()=>document.querySelector('#connection-label').textContent==='Live'&&document.querySelector('.lane[data-lane="upload"] .lane-progress-number').textContent==='50.0%');
   assert.deepEqual(f.errors,[]);
  });
  test(`${name}: hidden pages stop polling and resume immediately`,async t=>{
@@ -106,5 +118,7 @@ for(const [name,engine,options] of engines){
   const upload=p.locator('.pipe-node').filter({has:p.locator('.node-label',{hasText:'Upload'})});assert.equal(await upload.locator('strong').innerText(),'0');assert.equal(await upload.evaluate(n=>n.classList.contains('active')),false);
   assert.equal(await p.locator('#capture-strip').getByText('fixture-capture').isVisible(),true);
   assert.equal(await p.locator('#now-card').evaluate(n=>n.classList.contains('paused')),true);
+  assert.equal(await p.locator('.pipe-node.active').count(),1,'only capture stays active');
+  assert.match(await p.locator(UPLOAD).innerText(),/Last active/);
  });
 }

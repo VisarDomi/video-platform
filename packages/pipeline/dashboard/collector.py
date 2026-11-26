@@ -57,6 +57,24 @@ STAGES = {"server_ready": "convert", "remuxed": "validate", "artifact_valid": "d
           "cleanup_eligible": "verified", "short_waiting": "shorts", "short_joined": "shorts",
           "short_cancelled": "history", "blocked": "history", "failed": "attention"}
 ACTIVE_STATES = ("server_ready", "remuxed", "artifact_valid", "described", "metadata_ready", "upload_admitted", "uploading")
+# The worker's lanes, each on its own resource and its own recording at a time, and the
+# states each takes its recordings from (packages/pipeline/src/campaign/campaignWorker.ts).
+LANES = ("convert", "describe", "upload")
+LANE_STATES = {"convert": ("server_ready", "remuxed"), "describe": ("artifact_valid", "described"),
+               "upload": ("metadata_ready", "upload_admitted", "uploading")}
+
+
+def leased_lane(row, now):
+    """The lane whose stage runs on a recording now: its unexpired lease names it ("…-convert");
+    a serial worker's lease (no lane in its name) counts for the lane of the recording's state."""
+    owner = row.get("lease_owner")
+    expires = stamp(row.get("lease_expires_at"))
+    if not owner or (expires is not None and expires <= now):
+        return None
+    suffix = owner.rsplit("-", 1)[-1]
+    if suffix in LANES:
+        return suffix
+    return next((lane for lane, states in LANE_STATES.items() if row["state"] in states), None)
 
 
 def read_json(path, fallback=None):
@@ -179,11 +197,12 @@ LANE_WAITS = ("upload_quota_wait", "resource_wait", "full_ahead")
 def merge_worker_steps(events):
     """The worker's current step from its campaign-step journal events, oldest first. With
     lanes (the event's "lane"), each lane's latest step counts: a wait of the convert or the
-    describe lane is the campaign's, else the newest step; "uploads" is the upload lane's."""
+    describe lane is the campaign's, else the newest step; "uploads" is the upload lane's.
+    "lanes" holds each lane's own latest step."""
     latest = {}
     for event in events:
         step = (event.get("result") or {}).get("step") or {}
-        lane = event.get("lane") if event.get("lane") in ("convert", "describe", "upload") else None
+        lane = event.get("lane") if event.get("lane") in LANES else None
         latest[lane] = step
     if not latest:
         return None
@@ -195,7 +214,29 @@ def merge_worker_steps(events):
     uploads = (latest.get("upload") or latest.get(None) or {}).get("uploads")
     return {"disposition": step.get("disposition"), "reason": safe_reason(step.get("reason")),
             "uploads": uploads if isinstance(uploads, str) else None,
-            "lanes": {lane: (latest[lane] or {}).get("disposition") for lane in latest if lane}}
+            "lanes": {lane: {"disposition": (latest[lane] or {}).get("disposition"),
+                             "reason": safe_reason((latest[lane] or {}).get("reason")) or None}
+                      for lane in latest if lane}}
+
+
+def current_run_events(entries):
+    """The campaign-step events of the worker's current run: the journal entries (oldest
+    first) that share the newest entry's systemd invocation. A step from before a restart
+    describes a process that is gone."""
+    if not entries:
+        return []
+    current = entries[-1].get("_SYSTEMD_INVOCATION_ID")
+    events = []
+    for entry in entries:
+        if current and entry.get("_SYSTEMD_INVOCATION_ID") != current:
+            continue
+        try:
+            event = json.loads(entry.get("MESSAGE", ""))
+        except (ValueError, TypeError):
+            continue
+        if isinstance(event, dict) and event.get("event") == "campaign-step":
+            events.append(event)
+    return events
 
 
 def latest_worker_step():
@@ -205,19 +246,21 @@ def latest_worker_step():
     try:
         # Each lane logs a step only when it changes: read far enough back to see all three.
         result = subprocess.run(["journalctl", "--user", "-u", "video-pipeline", "-n", "400", "-o", "json",
-                                 "--output-fields=MESSAGE", "--no-pager"],
+                                 "--output-fields=MESSAGE,_SYSTEMD_INVOCATION_ID", "--no-pager"],
                                 capture_output=True, text=True, timeout=2, check=True)
         if len(result.stdout) > 2_000_000:
             return None
-        events = []
+        entries = []
         for line in result.stdout.splitlines():
             try:
-                event = json.loads(json.loads(line).get("MESSAGE", ""))
-                if isinstance(event, dict) and event.get("event") == "campaign-step":
-                    events.append(event)
-            except (ValueError, AttributeError, TypeError):
-                pass
-        return merge_worker_steps(events)
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(entry, dict):
+                entries.append(entry)
+        events = current_run_events(entries)
+        # A run that has not finished its first step yet: running, no step to show.
+        return merge_worker_steps(events) or ({"disposition": None, "reason": "", "uploads": None, "lanes": {}} if entries else None)
     except (OSError, subprocess.SubprocessError):
         pass
     return None
@@ -316,6 +359,15 @@ def uploads_held(control, worker_step):
     return uploads[len("held: "):] if uploads.startswith("held: ") else None
 
 
+def lane_summary(working, queue, worker_step):
+    """Each lane (conversion, description, upload): the recording it works on, its own latest
+    step from the worker's journal, and how many recordings wait for it."""
+    steps = (worker_step or {}).get("lanes") or {}
+    return [{"lane": lane, "job": working.get(lane), "step": steps.get(lane),
+             "waiting": sum(1 for item in queue if item["lane"] == lane and item.get("uplink", "home") == "home")}
+            for lane in LANES]
+
+
 def transfer_progress(attempt, artifact_size, now):
     if not attempt:
         return None
@@ -363,40 +415,61 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         attempts = [dict(r) for r in db.execute("""SELECT a.id,a.recording_id,a.phase,a.started_at,a.evidence_json,a.transfer_started,
             a.uplink,u.calendar_month FROM upload_attempts a LEFT JOIN upload_reservations u ON u.id=a.reservation_id
             WHERE a.status='started' ORDER BY a.started_at DESC LIMIT 3""")]
-        active_row = next((r for r in records if r["state"] in ("uploading", "upload_admitted")), None)
-        if active_row is None:
-            active_row = next((r for r in records if r["lease_owner"] and r["state"] in ACTIVE_STATES), None)
-        active = identity(active_row) if active_row else None
-        if active:
-            active["generated_title"] = metadata_titles.get(active_row["id"])
-            if not active["generated_title"]:
-                description = db.execute("SELECT output_json FROM descriptions WHERE recording_id=?", (active_row["id"],)).fetchone()
+        # The uplink an upload goes out on: its attempt's, else its reservation's.
+        reserved_on = {r["recording_id"]: r["uplink"] for r in db.execute(
+            "SELECT recording_id, uplink FROM upload_reservations WHERE status='reserved' AND recording_id IS NOT NULL")}
+        sending_on = {a["recording_id"]: a["uplink"] for a in attempts}
+        uplink_of = lambda row: sending_on.get(row["id"]) or reserved_on.get(row["id"]) or "home"
+        # Each lane's recording: the one its lease names; the upload lane's is the home upload
+        # in progress, leased or not (an interrupted upload stays until the worker resumes it).
+        lane_rows = {}
+        for row in records:
+            if row["state"] in ("uploading", "upload_admitted"):
+                if uplink_of(row) == "home":
+                    lane_rows.setdefault("upload", row)
+                continue
+            lane = leased_lane(row, now)
+            if lane:
+                lane_rows.setdefault(lane, row)
+
+        def job(row):
+            item = identity(row)
+            item["generated_title"] = metadata_titles.get(row["id"])
+            if not item["generated_title"]:
+                description = db.execute("SELECT output_json FROM descriptions WHERE recording_id=?", (row["id"],)).fetchone()
                 try:
                     output = json.loads(description["output_json"]) if description else None
                     title = output.get("title") if isinstance(output, dict) else None
-                    active["generated_title"] = title if isinstance(title, str) and title.strip() else None
+                    item["generated_title"] = title if isinstance(title, str) and title.strip() else None
                 except (ValueError, TypeError):
-                    active["generated_title"] = None
-            active["size_bytes"] = artifact.get(active_row["id"], {}).get("size_bytes")
-            attempt = next((a for a in attempts if a["recording_id"] == active_row["id"]), None)
-            active["started_at"] = attempt["started_at"] if attempt else active_row["updated_at"]
-            active["progress"] = transfer_progress(attempt, active["size_bytes"], now)
-            active["reservation_month"] = attempt["calendar_month"] if attempt else None
-            active["uplink"] = attempt["uplink"] if attempt else None
-            active["phase"] = attempt["phase"] if attempt else active["stage"]
-            if active["stage"] == "convert":
+                    item["generated_title"] = None
+            item["size_bytes"] = artifact.get(row["id"], {}).get("size_bytes")
+            attempt = next((a for a in attempts if a["recording_id"] == row["id"]), None)
+            item["started_at"] = attempt["started_at"] if attempt else row["updated_at"]
+            item["progress"] = transfer_progress(attempt, item["size_bytes"], now)
+            item["reservation_month"] = attempt["calendar_month"] if attempt else None
+            item["uplink"] = attempt["uplink"] if attempt else None
+            item["phase"] = attempt["phase"] if attempt else item["stage"]
+            if item["stage"] == "convert":
                 try:
                     output = [p.stat().st_size for p in (data_root / "pipeline/artifacts/production-v6").glob("*.partial.mp4")
-                              if p.name.startswith(active_row["id"]) and not p.is_symlink()]
-                    active["output_bytes"] = sum(output)
+                              if p.name.startswith(row["id"]) and not p.is_symlink()]
+                    item["output_bytes"] = sum(output)
                 except OSError:
-                    active["output_bytes"] = None
+                    item["output_bytes"] = None
+            return item
+
+        working = {lane: job(row) for lane, row in lane_rows.items()}
+        working_ids = {row["id"] for row in lane_rows.values()}
         queue = []
         for row in records:
-            if row["state"] in ACTIVE_STATES and not (active and row["id"] == active["id"]):
+            if row["state"] in ACTIVE_STATES and row["id"] not in working_ids:
                 item = identity(row)
                 item["size_bytes"] = artifact.get(row["id"], {}).get("size_bytes")
                 item["generated_title"] = metadata_titles.get(row["id"])
+                item["lane"] = next(lane for lane, states in LANE_STATES.items() if row["state"] in states)
+                if row["state"] in ("uploading", "upload_admitted"):
+                    item["uplink"] = uplink_of(row)
                 queue.append(item)
         confirmations = [dict(r) for r in db.execute("""SELECT c.recording_id,c.confirm_after,a.remote_id
             FROM upload_confirmations c JOIN upload_attempts a ON a.id=c.attempt_id
@@ -528,12 +601,12 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         # Converting ahead: a cooldown or an attention hold holds uploads only.
         state = "uploads_held"
     elif control["state"] == "paused":
-        state = "cooldown" if control["resume_at"] else "finishing" if active else "paused"
-    elif not active and worker_step is None:
+        state = "cooldown" if control["resume_at"] else "finishing" if working else "paused"
+    elif not working and worker_step is None:
         # A bounded journal lookup can fail during boot or disk contention.
         # Running intent plus a heartbeat cannot establish the current wait.
         state = "status_unavailable"
-    elif not active and worker_step and worker_step["disposition"] in ("upload_quota_wait", "resource_wait", "full_ahead"):
+    elif not working and worker_step and worker_step["disposition"] in ("upload_quota_wait", "resource_wait", "full_ahead"):
         state = worker_step["disposition"]
     heartbeat = stamp(health["worker_heartbeat"])
     late_heartbeat = not manual_hold and current_services.get("video-pipeline", {}).get("state") == "active" and (
@@ -561,7 +634,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
                        "short_waiting": counts["short_waiting"], "short_joined": counts["short_joined"],
                        "prepared_batches": len(batches), "confirming": len(confirmations), "capturing": sum(r["active"] for r in live),
                        "submitted": totals24["submitted"], "receipts_verified": totals24["verified"], "converted": totals24["converted"]},
-            "active": active, "captures": live, "finalization": finalized, "queue": queue,
+            "parallel": uplink is not None, "lanes": lane_summary(working, queue, worker_step), "captures": live, "finalization": finalized, "queue": queue,
             "confirmations": confirmations, "shorts": {"waiting": short_waiting, "batches": sorted(batches, key=lambda b: b["id"])},
             "budget": budget, "ahead": ahead and {**ahead, "uploads_held": uploads_held(control, worker_step)}, "carrier": carrier, "office": office, "history": [{"date": day, **values} for day, values in days.items()], "activity": activity,
             "services": current_services, "service_labels": EXTRA_UNITS, "sources": sources, "destination": control.get("upload_provider"), "storage": storage,

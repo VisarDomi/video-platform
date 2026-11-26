@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const CACHE_KEY = 'pipeline.snapshot.v1';
+const CACHE_KEY = 'pipeline.snapshot.v2';
 
 const ACTIVE_LABELS = {
   convert: 'Converting',
@@ -157,6 +157,9 @@ function working() {
 }
 
 function queueStatusFor(row, isCurrent, isWorking) {
+  if (row.uplink && row.uplink !== 'home' && ['uploading', 'upload_admitted'].includes(row.state)) {
+    return { label: `Uploading · ${row.uplink}`, tone: 'upload' };
+  }
   if (isWorking) {
     const activeStage = ACTIVE_LABELS[row.stage] || row.stage || 'Working';
     return { label: `Working · ${activeStage}`, tone: 'live' };
@@ -211,44 +214,148 @@ function setConnection(ok, message) {
   if (!ok) text('connection-banner', message || `Connection interrupted. Showing the last snapshot from ${data ? time(data.generated_at, true) : 'this phone'}.`);
 }
 
-function renderHero() {
-  const a = data.active, c = data.campaign, state = c.state;
-  const paused = ['user_paused', 'paused', 'worker_stopped', 'worker_unresponsive'].includes(state);
-  $('now-card').classList.toggle('paused', paused);
+// The worker's three lanes, each on its own resource and its own recording at a time.
+const LANES = {
+  convert: { label: 'Convert', icon: '◫', resource: 'On the CPU', stages: ['convert', 'validate'], none: 'Nothing waiting to convert.' },
+  describe: { label: 'Describe', icon: '✧', resource: 'On the GPU', stages: ['describe', 'metadata'], none: 'Nothing waiting to describe.' },
+  upload: { label: 'Upload', icon: '↑', resource: 'On the home network', stages: ['ready', 'upload'], none: 'Nothing ready to upload.' },
+};
+const STOPPED_STATES = ['user_paused', 'paused', 'worker_stopped', 'worker_unresponsive'];
 
-  let title = a ? (ACTIVE_LABELS[a.stage] || 'Working') : 'Idle';
-  let tag = a ? (ACTIVE_LABELS[a.stage] || 'WORKING') : 'PIPELINE RUNNING';
-  if (a?.stage === 'upload' && a.progress?.percent >= 100) {
-    title = a.phase === 'metadata_submitting' ? 'Publishing metadata' : 'Finishing upload';
-    tag = a.phase === 'metadata_submitting' ? 'SUBMITTING DETAILS' : 'PROVIDER ASSEMBLY';
+function lanes() { return data.lanes || []; }
+function lane(key) { return lanes().find(l => l.lane === key) || { lane: key, job: null, step: null, waiting: 0 }; }
+function busyLanes() { return working() ? lanes().filter(l => l.job) : []; }
+
+// One lane's status: what it works on, or why it waits.
+function laneStatus(l) {
+  const state = data.campaign.state;
+  if (STOPPED_STATES.includes(state) || state === 'status_unavailable') {
+    return l.job ? { label: 'Last active', tone: 'wait' } : { label: state === 'worker_stopped' ? 'Stopped' : state === 'status_unavailable' ? 'Unknown' : 'Paused', tone: 'wait' };
   }
+  if (state === 'cooldown') return { label: 'Retry scheduled', tone: 'wait', note: `Next retry ${time(data.campaign.resume_at, true)}.` };
+  if (l.job) {
+    const a = l.job;
+    if (a.stage === 'upload' && a.progress?.percent >= 100) return { label: a.phase === 'metadata_submitting' ? 'Publishing metadata' : 'Finishing upload', tone: 'live' };
+    return { label: ACTIVE_LABELS[a.stage] || 'Working', tone: 'live' };
+  }
+  const held = l.lane === 'upload' && (data.ahead?.uploads_held || (state === 'uploads_held' ? data.campaign.attention || 'retry scheduled' : null));
+  if (held) return { label: 'Held', tone: 'wait', note: `Uploads held: ${held}.` };
+  const step = l.step || {};
+  if (step.disposition === 'resource_wait') return { label: 'Waiting for resources', tone: 'wait', note: step.reason || 'Waiting for disk/CPU room before starting the next stage.' };
+  if (step.disposition === 'full_ahead') return { label: 'Ahead to the cap', tone: 'wait', note: `${bytes(data.ahead?.ready_bytes || 0, 0)} converted and waiting (cap ${bytes(data.ahead?.limit_bytes || 0, 0)}). Resumes as files upload.` };
+  if (step.disposition === 'upload_quota_wait') return { label: 'Waiting for allowance', tone: 'wait', note: `Next allowance release ${date(data.budget.next_release)}.` };
+  if (!data.parallel && l.waiting) return { label: 'Queued', tone: 'process', note: 'One stage at a time: this lane runs when the worker reaches it.' };
+  return { label: 'Idle', tone: '' };
+}
+
+function renderLane(l) {
+  const meta = LANES[l.lane], a = l.job, status = laneStatus(l);
+  const stopped = STOPPED_STATES.includes(data.campaign.state);
+  const isLive = Boolean(a) && working();
+  const card = el('section', 'lane' + (isLive ? ' busy' : '') + (a && !isLive ? ' stale' : ''));
+  card.dataset.lane = l.lane;
+  card.setAttribute('role', 'listitem');
+  card.setAttribute('aria-label', `${meta.label}: ${status.label}${a ? ', ' + (a.source_path || a.id) : ''}`);
+
+  const head = el('div', 'lane-head');
+  const name = el('div', 'lane-name', meta.label);
+  name.append(el('small', '', l.lane === 'upload' && a?.uplink && a.uplink !== 'home' ? `On the ${a.uplink} network` : meta.resource));
+  head.append(el('span', 'lane-icon', meta.icon), name, pill(status.label, status.tone));
+  card.append(head);
+
+  if (a) {
+    const body = el('div', 'lane-job');
+    const line = el('div', 'lane-meta');
+    if (a.provider) line.append(provider(a.provider));
+    line.append(el('span', 'lane-alias', a.alias));
+    const parts = [duration(a.seconds)];
+    if (a.size_bytes) parts.push(bytes(a.size_bytes));
+    parts.push(`captured ${date(a.captured_at)}`);
+    line.append(el('span', '', parts.join(' · ')));
+    body.append(line);
+    if (l.lane !== 'convert') {
+      const title = el('p', 'lane-title' + (a.generated_title ? '' : ' pending-title'), a.generated_title || 'Title will appear after description.');
+      body.append(title);
+    }
+    const path = pathBox(a.source_path || a.id);
+    path.classList.add('lane-path');
+    path.setAttribute('aria-label', 'Recording source path');
+    body.append(path);
+
+    const p = a.progress;
+    const bar = el('div', 'job-progress' + (!p && isLive ? ' indeterminate' : ''));
+    const fill = el('div');
+    fill.style.width = p ? `${Math.min(100, Math.max(0, p.percent))}%` : isLive ? '' : '0%';
+    bar.append(fill);
+    const caption = el('div', 'progress-caption');
+    const elapsed = a.started_at && isLive ? (Date.now() - new Date(a.started_at).valueOf()) / 1000 : null;
+    caption.append(
+      el('span', 'lane-progress-detail', p
+        ? `${bytes(p.acknowledged_bytes)} of ${bytes(p.total_bytes)} acknowledged`
+        : a.stage === 'convert' && a.output_bytes ? `${bytes(a.output_bytes)} written so far`
+          : isLive ? `Processing ${duration(a.seconds)} of footage` : stopped ? 'Resumes when the worker runs again.' : 'Waiting for the worker.'),
+      el('span', 'lane-progress-number', p ? `${p.percent.toFixed(1)}%` : elapsed !== null ? `${duration(elapsed)} elapsed` : ''),
+    );
+    body.append(bar, caption);
+
+    const extras = [];
+    if (p) {
+      if (!p.fresh) extras.push(`Last progress ${ago(p.updated_at)}.`);
+      else if (p.percent >= 100) extras.push('File transfer complete; provider processing and verification follow.');
+      else if (p.bytes_per_second) extras.push(`${((p.bytes_per_second * 8) / 1e6).toFixed(1)} Mbps · ~${duration(p.eta_seconds)} left.`);
+    } else if (a.stage === 'upload' && isLive) {
+      extras.push('Transfer active; awaiting first acknowledged byte update.');
+    }
+    if (a.reservation_month && a.reservation_month !== data.budget.month) {
+      extras.push(`Budgeted in ${new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(new Date(a.reservation_month + '-15T12:00:00Z'))}.`);
+    }
+    if (extras.length) body.append(el('p', 'lane-note', extras.join(' ')));
+    card.append(body);
+  } else {
+    card.append(el('p', 'lane-note', status.note || (l.waiting ? 'Takes the oldest waiting recording next.' : meta.none)));
+  }
+
+  const notes = [];
+  if (a && status.note) notes.push(status.note);
+  if (a || l.waiting) notes.push(`${formatCount(l.waiting)} ${a ? 'more ' : ''}waiting`);
+  if (l.lane === 'upload' && data.office?.uploading) {
+    notes.push(`office uploading ${data.office.uploading}${data.office.progress ? ` (${data.office.progress.percent.toFixed(0)}%)` : ''}`);
+  }
+  if (notes.length) {
+    const foot = el('button', 'lane-foot', notes.join(' · '));
+    foot.type = 'button';
+    foot.addEventListener('click', () => openQueue(l.lane));
+    card.append(foot);
+  }
+  return card;
+}
+
+function renderHero() {
+  const c = data.campaign, state = c.state;
+  const paused = STOPPED_STATES.includes(state);
+  $('now-card').classList.toggle('paused', paused);
+  const busy = busyLanes();
+
+  let title = busy.length ? busy.map(l => laneStatus(l).label).join(' · ') : 'Idle';
+  let tag = busy.length ? `${busy.length} OF 3 LANES WORKING` : 'PIPELINE RUNNING';
   if (state === 'user_paused' || state === 'paused') { title = 'Paused'; tag = 'UPLOAD WORKER PAUSED'; }
   if (state === 'worker_stopped') { title = 'Worker stopped'; tag = 'UPLOAD WORKER OFFLINE'; }
   if (state === 'worker_unresponsive') { title = 'Worker unresponsive'; tag = 'HEARTBEAT LATE'; }
   if (state === 'cooldown') { title = 'Retry scheduled'; tag = 'AUTOMATIC RETRY'; }
   if (state === 'upload_quota_wait') { title = 'Waiting for allowance'; tag = 'AUTOMATIC BUDGET WAIT'; }
-  if (state === 'resource_wait') { title = 'Waiting for resources'; tag = 'RESOURCE WAIT'; }
-  if (state === 'uploads_held' && !a) { title = 'Uploads held'; tag = 'CONVERTING AHEAD'; }
-  if (state === 'uploads_held' && a) { tag = 'UPLOADS HELD · CONVERTING'; }
-  if (state === 'full_ahead') { title = 'Converted ahead to the cap'; tag = 'WAITING FOR UPLOADS'; }
+  if (state === 'resource_wait' && !busy.length) { title = 'Waiting for resources'; tag = 'RESOURCE WAIT'; }
+  if (state === 'uploads_held') tag = busy.length ? `UPLOADS HELD · ${busy.length} OF 3 LANES WORKING` : 'UPLOADS HELD';
+  if (state === 'uploads_held' && !busy.length) title = 'Uploads held';
+  if (state === 'full_ahead' && !busy.length) { title = 'Converted ahead to the cap'; tag = 'WAITING FOR UPLOADS'; }
   if (state === 'status_unavailable') { title = 'Worker status unavailable'; tag = 'SERVICE STATUS UNAVAILABLE'; }
   if (state === 'finishing') { tag = 'FINISHING ACTIVE WORK'; }
 
-  text('now-state', live ? tag.toUpperCase() : `LAST SEEN · ${tag.toUpperCase()}`);
+  text('now-state', live ? tag : `LAST SEEN · ${tag}`);
+  text('now-mode', data.parallel ? 'Convert · describe · upload at once' : 'One stage at a time');
   text('now-title', title);
-  text('now-generated-title', a ? (a.generated_title || 'Title will appear after description.') : '');
-  $('now-generated-title').classList.toggle('pending-title', Boolean(a && !a.generated_title));
-  setPathContent($('now-source-path'), a ? (a.source_path || a.id) : '');
 
   const detail = $('now-detail');
-  detail.replaceChildren();
-  if (a) {
-    if (a.provider) detail.append(provider(a.provider));
-    const parts = [duration(a.seconds)];
-    if (a.size_bytes) parts.push(bytes(a.size_bytes));
-    parts.push(`captured ${date(a.captured_at)}`);
-    detail.append(document.createTextNode(parts.join(' · ')));
-  } else if (state === 'user_paused' || state === 'paused') {
+  if (state === 'user_paused' || state === 'paused') {
     detail.textContent = `${data.counts.capturing} live recording${data.counts.capturing === 1 ? '' : 's'} · capture stays independent`;
   } else if (state === 'worker_stopped') {
     detail.textContent = 'Queue and completed work are preserved.';
@@ -258,65 +365,27 @@ function renderHero() {
     detail.textContent = `Next retry ${time(c.resume_at, true)}.`;
   } else if (state === 'upload_quota_wait') {
     detail.textContent = `Next allowance release ${date(data.budget.next_release)}. Resumes automatically.`;
-  } else if (state === 'uploads_held') {
-    detail.textContent = `Uploads held: ${data.ahead?.uploads_held || c.attention || 'retry scheduled'}. Conversion continues.`;
-  } else if (state === 'full_ahead') {
-    detail.textContent = `${bytes(data.ahead?.ready_bytes || 0, 0)} converted and waiting (cap ${bytes(data.ahead?.limit_bytes || 0, 0)}). Conversion resumes as files upload.`;
-  } else if (state === 'resource_wait') {
-    detail.textContent = c.step?.reason || 'Waiting for disk/CPU room before starting the next stage.';
   } else if (state === 'status_unavailable') {
     detail.textContent = 'Queue snapshot is available; live worker status check is temporarily unavailable.';
   } else {
     detail.textContent = `${data.counts.capturing} recording${data.counts.capturing === 1 ? '' : 's'} live · ${formatCount(data.counts.ready)} queued · ${formatCount(data.counts.verified)} verified`;
   }
 
-  const elapsed = a?.started_at ? (Date.now() - new Date(a.started_at).valueOf()) / 1000 : null;
-  text('job-elapsed', a && !paused ? `${duration(elapsed)} elapsed` : '');
-
-  const p = a?.progress;
-  $('job-progress').classList.toggle('indeterminate', Boolean(a && !p && !paused));
-  $('job-fill').style.width = p ? `${Math.min(100, Math.max(0, p.percent))}%` : paused ? '0%' : '';
-  text('progress-number', p ? `${p.percent.toFixed(1)}%` : a && !paused ? 'In progress' : '');
-  text(
-    'progress-detail',
-    p
-      ? `${bytes(p.acknowledged_bytes)} of ${bytes(p.total_bytes)} acknowledged`
-      : a?.stage === 'convert' && a.output_bytes
-        ? `${bytes(a.output_bytes)} written so far`
-        : a && !paused
-          ? `Processing ${a.size_bytes ? bytes(a.size_bytes) + ' · ' : ''}${duration(a.seconds)} of footage`
-          : paused
-            ? 'Work resumes when the upload worker is enabled.'
-            : 'Watching for the next finalized recording.',
-  );
-
-  const extras = [];
-  if (p) {
-    if (!p.fresh) extras.push(`Last progress ${ago(p.updated_at)}`);
-    else if (p.percent >= 100) extras.push('File transfer complete; provider processing and verification follow.');
-    else if (p.bytes_per_second) extras.push(`${((p.bytes_per_second * 8) / 1e6).toFixed(1)} Mbps · ~${duration(p.eta_seconds)} left`);
-    if (p.percent < 100) extras.push('Online verification follows upload.');
-  } else if (a?.stage === 'upload') {
-    extras.push('Transfer active; awaiting first acknowledged byte update.');
-  }
-  if (a?.uplink && a.uplink !== 'home') extras.push(`Sent from the ${a.uplink} network.`);
-  if (a?.reservation_month && a.reservation_month !== data.budget.month) {
-    extras.push(`Budgeted in ${new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(new Date(a.reservation_month + '-15T12:00:00Z'))}.`);
-  }
-  text('job-extra', extras.join(' '));
+  $('lanes').replaceChildren(...['convert', 'describe', 'upload'].map(key => renderLane(lane(key))));
 }
 
 function renderStages() {
-  const c = data.counts, a = working() ? data.active : null;
-  const queuedConvert = data.queue.filter(r => ['convert', 'validate'].includes(r.stage)).length;
-  const queuedDescribe = data.queue.filter(r => ['describe', 'metadata'].includes(r.stage)).length;
-  const queuedUpload = data.queue.filter(r => ['upload', 'ready'].includes(r.stage)).length;
+  const c = data.counts;
+  const node = key => {
+    const l = lane(key), busy = Boolean(l.job) && working();
+    return [key, LANES[key].icon, LANES[key].label, busy ? 1 : 0, busy, false, l.waiting ? `${formatCount(l.waiting)} ${key === 'upload' ? 'ready' : 'queued'}` : ''];
+  };
   const specs = [
     ['capture', '◉', 'Record', c.capturing, c.capturing > 0, false, c.capturing ? 'recording' : 'idle'],
     ['finalize', '◇', 'Finalize', data.finalization.processing, data.finalization.processing > 0, false, data.finalization.completed24 ? `${formatCount(data.finalization.completed24)} in 24h` : ''],
-    ['convert', '◫', 'Convert', a && ['convert', 'validate'].includes(a.stage) ? 1 : 0, a && ['convert', 'validate'].includes(a.stage), false, queuedConvert ? `${formatCount(queuedConvert)} queued` : ''],
-    ['describe', '✧', 'Describe', a && ['describe', 'metadata'].includes(a.stage) ? 1 : 0, a && ['describe', 'metadata'].includes(a.stage), false, queuedDescribe ? `${formatCount(queuedDescribe)} queued` : ''],
-    ['upload', '↑', 'Upload', a?.stage === 'upload' ? 1 : 0, a?.stage === 'upload', false, queuedUpload ? `${formatCount(queuedUpload)} ready` : ''],
+    node('convert'),
+    node('describe'),
+    node('upload'),
     ['verify', '✓', 'Verify', c.confirming, false, c.confirming > 0, c.confirming ? 'pending check' : ''],
   ];
 
@@ -573,14 +642,15 @@ function renderServices() {
 
 function renderQueue() {
   if (!data) return;
-  const signature = JSON.stringify([filter, shown, $('queue-search').value, working(), data.active?.id, data.active?.stage, data.active?.progress?.percent, data.queue, data.confirmations, data.shorts]);
+  const signature = JSON.stringify([filter, shown, $('queue-search').value, working(), data.lanes, data.queue, data.confirmations, data.shorts]);
   if (signature === queueSignature) return;
   queueSignature = signature;
 
   const anchor = page === 'queue' ? [...document.querySelectorAll('.queue-row')].find(n => n.getBoundingClientRect().bottom > 20) : null;
   const anchorId = anchor?.dataset.id, anchorTop = anchor?.getBoundingClientRect().top;
 
-  const nextAll = [...(data.active ? [data.active] : []), ...data.queue];
+  const current = lanes().filter(l => l.job).map(l => l.job);
+  const nextAll = [...current, ...data.queue];
   const verifyAll = data.confirmations.map(r => ({
     id: r.recording_id,
     alias: r.alias,
@@ -645,8 +715,8 @@ function renderQueue() {
   const list = $('queue-list');
   list.replaceChildren();
   for (const [i, r] of rows.slice(0, shown).entries()) {
-    const current = data.active?.id === r.id;
-    const isWorking = current && working();
+    const job = current.find(j => j.id === r.id);
+    const isWorking = Boolean(job) && working();
     const n = el('article', 'queue-row' + (isWorking ? ' is-active' : ''));
     n.dataset.id = r.id;
 
@@ -655,7 +725,7 @@ function renderQueue() {
     left.append(el('span', 'queue-position', isWorking ? 'NOW' : `#${String(i + 1).padStart(2, '0')}`));
     if (r.provider) left.append(provider(r.provider));
     left.append(el('span', 'queue-alias', r.alias));
-    const status = queueStatusFor(r, current, isWorking);
+    const status = queueStatusFor(r, Boolean(job), isWorking);
     head.append(left, pill(status.label, status.tone));
     n.append(head);
 
@@ -673,8 +743,8 @@ function renderQueue() {
     } else {
       meta.append(el('span', '', `Captured ${date(r.captured_at || r.id)}`));
     }
-    if (isWorking && data.active?.progress?.percent !== undefined) {
-      meta.append(el('strong', '', `${data.active.progress.percent.toFixed(1)}% uploaded`));
+    if (isWorking && job.progress?.percent !== undefined) {
+      meta.append(el('strong', '', `${job.progress.percent.toFixed(1)}% uploaded`));
     }
     n.append(meta);
     list.append(n);
@@ -858,7 +928,7 @@ function usable(value) {
     && value.services && value.storage && value.finalization && value.monitoring && value.shorts
     && Array.isArray(value.shorts.waiting) && Array.isArray(value.shorts.batches) && Array.isArray(value.queue)
     && Array.isArray(value.history) && Array.isArray(value.activity) && Array.isArray(value.captures)
-    && Array.isArray(value.confirmations) && Array.isArray(value.budget.uplinks);
+    && Array.isArray(value.confirmations) && Array.isArray(value.budget.uplinks) && Array.isArray(value.lanes);
 }
 
 async function refresh(force = false) {

@@ -5,7 +5,14 @@ The saved app works on home Wi-Fi and through the existing Tailscale route to
 this PC, with the same URL and home-network certificate already used by Monitor
 and the video apps. No account, native build or provider login is required.
 
-The overview shows the active job, recording/finalization/conversion/description/
+The overview shows the worker's three lanes side by side, each with its own
+recording: conversion (the CPU), description (the GPU) and home upload (the
+network), as the worker runs them at once with an uplink configured (without one it
+says it takes one stage at a time). Each lane shows its job, its progress or why it
+waits (resources, the ahead cap, an upload hold, the allowance), and how many
+recordings wait for it. A lane's job is the recording its ledger lease names; the
+upload lane's is the home upload in progress (an office upload shows in the carrier
+card and the queue instead). Below them come the recording/finalization/conversion/description/
 upload/verification stages, the cumulative Tirana upload allowance, fourteen-day
 submission/verification chart, compatible short batches, live disk space and
 service CPU/RAM. Queue and Activity tabs provide the detailed job list and real
@@ -13,11 +20,11 @@ state transitions. Queue entries are the registered jobs; newly finalized
 recordings appear as the worker admits them. The dashboard never performs a
 parallel discovery/conversion/upload or provider crawl.
 
-The active-job card, Next up preview, Queue, and Activity views show the complete
+The lane cards, Next up preview, Queue, and Activity views show the complete
 recording source-folder path, wrapping without truncation on phones so every job and
 state transition can be identified, selected, and copied at a glance. Before upload
-metadata is composed, the active job uses the descriptor's title when available;
-earlier stages say the title has not been generated yet. Queue rows distinguish
+metadata is composed, the description and upload lanes use the descriptor's title
+when available, else say the title has not been generated yet. Queue rows distinguish
 working stages from waiting stages, and Activity rows show exact milestone labels
 and sanitized transition reasons.
 
@@ -63,7 +70,9 @@ An unavailable data source returns the previous snapshot as stale, never fresh
 zero counts. There is no sampler, scheduled task, persistent metrics database or
 new provider/authentication session.
 
-An idle worker's current wait comes from its bounded journal read. If that read
+Each lane's wait comes from its latest step in the worker's bounded journal read,
+counting only the current run's steps (a step logged before a restart describes a
+process that is gone). If that read
 is temporarily unavailable, the dashboard says status unavailable while retaining
 the independently measured budget, queue and heartbeat. It does not infer running
 activity from campaign intent; the next successful snapshot restores the wait.

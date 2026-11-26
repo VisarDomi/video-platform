@@ -11,7 +11,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from collector import snapshot, upload_budget, transfer_progress, merge_worker_steps
+from collector import snapshot, upload_budget, transfer_progress, merge_worker_steps, current_run_events
 from babysit_health import acknowledge_current_removals
 from server import Snapshot, allowed_client, create_server
 
@@ -38,7 +38,7 @@ class DashboardDataTests(unittest.TestCase):
           CREATE TABLE descriptions(recording_id TEXT,output_json TEXT);
           CREATE TABLE campaign_control(id INTEGER,state TEXT,daily_upload_limit_bytes INTEGER,resume_at TEXT,attention_reason TEXT,upload_provider TEXT);
           CREATE TABLE upload_attempts(id TEXT,recording_id TEXT,phase TEXT,status TEXT,started_at TEXT,evidence_json TEXT,transfer_started INTEGER,reservation_id TEXT,progress_bytes INTEGER,remote_id TEXT,uplink TEXT DEFAULT 'home');
-          CREATE TABLE upload_reservations(id TEXT,calendar_month TEXT,reserved_bytes INTEGER,status TEXT,uplink TEXT NOT NULL DEFAULT 'home');
+          CREATE TABLE upload_reservations(id TEXT,calendar_month TEXT,reserved_bytes INTEGER,status TEXT,uplink TEXT NOT NULL DEFAULT 'home',recording_id TEXT);
           CREATE TABLE upload_confirmations(attempt_id TEXT,recording_id TEXT,confirm_after TEXT,status TEXT);
           CREATE TABLE short_parts(batch_id TEXT,recording_id TEXT,duration_seconds REAL,aspect_ratio REAL);
           CREATE TABLE state_events(id INTEGER,recording_id TEXT,from_state TEXT,to_state TEXT,reason TEXT,created_at TEXT);
@@ -57,9 +57,9 @@ class DashboardDataTests(unittest.TestCase):
           INSERT INTO recordings VALUES ('2026-01-03 010000 carol','live-c','/unused','edited',20,'short_waiting',NULL,NULL,'2026-11-01T00:00:00Z');
           INSERT INTO artifacts VALUES ('2026-01-01 010000 alice','/private/file.mp4',1000000000);
           INSERT INTO upload_attempts VALUES ('attempt','2026-01-01 010000 alice','started','started','2026-10-31T23:00:00Z','[]',1,'ticket',1000000000,NULL,'home');
-          INSERT INTO upload_reservations VALUES ('ticket','2026-10',1016777216,'reserved','home');
+          INSERT INTO upload_reservations VALUES ('ticket','2026-10',1016777216,'reserved','home','2026-01-01 010000 alice');
           INSERT INTO bandwidth_events VALUES ('2026-11',2000000000,'2026-11-01T00:00:00Z','home'),('2026-11',1000000000,'2026-10-31T23:30:00Z','home');
-          INSERT INTO upload_reservations VALUES ('other','2026-11',4000000000,'reserved','home');
+          INSERT INTO upload_reservations VALUES ('other','2026-11',4000000000,'reserved','home',NULL);
           INSERT INTO state_events VALUES (1,'2026-01-02 010000 bob','upload_uncertain','upload_verified','verified','2026-10-31T23:45:00Z');
           INSERT INTO state_events VALUES (2,'legacy-copy','upload_uncertain','upload_verified','verified','2026-10-31T23:50:00Z');
         """)
@@ -69,6 +69,10 @@ class DashboardDataTests(unittest.TestCase):
 
     def read(self, **kwargs):
         return snapshot(self.root, self.downloads, now=self.now, services=self.services, **kwargs)
+
+    def job(self, lane, data=None):
+        data = data or self.read()
+        return next(item for item in data["lanes"] if item["lane"] == lane)["job"]
 
     def test_read_only_counts_do_not_confuse_verification_events_with_safe_recordings(self):
         before = hashlib.sha256(self.path.read_bytes()).digest()
@@ -81,9 +85,10 @@ class DashboardDataTests(unittest.TestCase):
 
     def test_full_file_byte_claim_is_never_used_as_100_percent_progress(self):
         data = self.read()
-        self.assertEqual(data["active"]["size_bytes"], 1000000000)
-        self.assertIsNone(data["active"]["progress"])
-        self.assertEqual(data["active"]["reservation_month"], "2026-10")
+        upload = self.job("upload", data)
+        self.assertEqual(upload["size_bytes"], 1000000000)
+        self.assertIsNone(upload["progress"])
+        self.assertEqual(upload["reservation_month"], "2026-10")
         self.assertEqual(data["budget"]["reserved"], 4000000000)
 
     def test_active_queue_and_activity_include_source_paths_without_private_artifacts(self):
@@ -97,8 +102,8 @@ class DashboardDataTests(unittest.TestCase):
         self.db.execute("INSERT INTO descriptions VALUES ('2026-01-01 010000 alice',?)", (json.dumps({'title':'Earlier descriptor title'}),))
         self.db.commit()
         data = self.read()
-        self.assertEqual(data['active']['source_path'], active_source)
-        self.assertEqual(data['active']['generated_title'], 'Generated title [2026-01-01 010000 alice]')
+        self.assertEqual(self.job('upload', data)['source_path'], active_source)
+        self.assertEqual(self.job('upload', data)['generated_title'], 'Generated title [2026-01-01 010000 alice]')
         self.assertEqual(data['queue'][0]['source_path'], queued_source)
         bob_event = next(e for e in data['activity'] if e['recording'] == '2026-01-02 010000 bob')
         self.assertEqual(bob_event['source_path'], verified_source)
@@ -108,13 +113,56 @@ class DashboardDataTests(unittest.TestCase):
         self.assertNotIn('/private/file.mp4', json.dumps(data))
 
     def test_active_title_can_appear_before_upload_metadata_and_be_absent_before_description(self):
-        self.assertIsNone(self.read()['active']['generated_title'])
+        self.assertIsNone(self.job('upload')['generated_title'])
         self.db.execute("INSERT INTO descriptions VALUES ('2026-01-01 010000 alice',?)", (json.dumps({'title':'Fresh descriptor title'}),))
         self.db.commit()
-        self.assertEqual(self.read()['active']['generated_title'], 'Fresh descriptor title')
+        self.assertEqual(self.job('upload')['generated_title'], 'Fresh descriptor title')
         self.db.execute("UPDATE descriptions SET output_json='{}'")
         self.db.commit()
-        self.assertIsNone(self.read()['active']['generated_title'])
+        self.assertIsNone(self.job('upload')['generated_title'])
+
+    def test_each_lane_shows_its_own_recording_at_once(self):
+        self.db.execute("ALTER TABLE recordings ADD COLUMN lease_expires_at TEXT")
+        for name, state, owner in [("2026-01-04 010000 dave", "server_ready", "pipeline-campaign-7-convert"),
+                                   ("2026-01-05 010000 erin", "artifact_valid", "pipeline-campaign-7-describe"),
+                                   ("2026-01-06 010000 finn", "server_ready", None),
+                                   ("2026-01-07 010000 gus", "metadata_ready", None)]:
+            self.db.execute("INSERT INTO recordings VALUES (?,'live-a','/data/'||?,'edited',300,?,NULL,?,'2026-11-01T00:00:00Z','2026-11-01T12:00:00Z')",
+                            (name, name, state, owner))
+        self.db.commit()
+        data = self.read(worker_step={"disposition": "stage_completed", "lanes": {"convert": {"disposition": "stage_completed", "reason": None}}})
+        self.assertEqual([item["lane"] for item in data["lanes"]], ["convert", "describe", "upload"])
+        self.assertEqual({item["lane"]: item["job"]["id"] for item in data["lanes"]},
+                         {"convert": "2026-01-04 010000 dave", "describe": "2026-01-05 010000 erin", "upload": "2026-01-01 010000 alice"})
+        self.assertEqual({item["lane"]: item["waiting"] for item in data["lanes"]}, {"convert": 1, "describe": 0, "upload": 1})
+        self.assertEqual(data["lanes"][0]["step"], {"disposition": "stage_completed", "reason": None})
+        self.assertIsNone(data["lanes"][1]["step"])
+        self.assertEqual([item["id"] for item in data["queue"]], ["2026-01-06 010000 finn", "2026-01-07 010000 gus"])
+        self.assertEqual([item["lane"] for item in data["queue"]], ["convert", "upload"])
+        self.assertFalse(data["parallel"])
+
+    def test_an_expired_lease_works_on_nothing_and_a_serial_lease_counts_for_its_stage(self):
+        self.db.execute("ALTER TABLE recordings ADD COLUMN lease_expires_at TEXT")
+        self.db.execute("INSERT INTO recordings VALUES ('2026-01-04 010000 dave','live-a','/d','edited',300,'remuxed',NULL,'pipeline-campaign-7-convert','2026-11-01T00:00:00Z','2026-10-31T00:00:00Z')")
+        self.db.execute("INSERT INTO recordings VALUES ('2026-01-05 010000 erin','live-a','/e','edited',300,'described',NULL,'pipeline-campaign-7','2026-11-01T00:00:00Z','2026-11-01T12:00:00Z')")
+        self.db.commit()
+        data = self.read()
+        self.assertIsNone(self.job("convert", data))
+        self.assertEqual(self.job("describe", data)["id"], "2026-01-05 010000 erin")
+        self.assertEqual(self.job("describe", data)["stage"], "metadata")
+
+    def test_an_office_upload_is_not_the_home_upload_lane(self):
+        self.db.execute("UPDATE upload_attempts SET uplink='office'")
+        self.db.execute("UPDATE upload_reservations SET uplink='office' WHERE id='ticket'")
+        self.db.commit()
+        data = self.read()
+        self.assertIsNone(self.job("upload", data))
+        self.assertEqual((data["queue"][0]["id"], data["queue"][0]["uplink"]), ("2026-01-01 010000 alice", "office"))
+        self.assertEqual(data["lanes"][2]["waiting"], 0)
+        self.db.execute("UPDATE upload_attempts SET status='failed'")
+        self.db.execute("UPDATE recordings SET state='upload_admitted' WHERE id='2026-01-01 010000 alice'")
+        self.db.commit()
+        self.assertIsNone(self.job("upload"), "an admission for the office is the office's, before its attempt starts")
 
     def test_repeated_foreground_snapshots_close_readonly_database_handles(self):
         before = len(os.listdir('/proc/self/fd'))
@@ -126,7 +174,7 @@ class DashboardDataTests(unittest.TestCase):
                     {"stage": "file_transfer_progress", "bytesAcknowledged": 200000000, "checkedAt": "2026-11-01T00:00:30Z"}]
         self.db.execute("UPDATE upload_attempts SET evidence_json=?", (json.dumps(evidence),))
         self.db.commit()
-        progress = self.read()["active"]["progress"]
+        progress = self.job("upload")["progress"]
         self.assertEqual(progress["percent"], 20)
         self.assertAlmostEqual(progress["bytes_per_second"], 100000000/30)
         self.assertTrue(progress["fresh"])
@@ -364,8 +412,22 @@ class WorkerStepTests(unittest.TestCase):
         ])
         self.assertEqual(merged["disposition"], "full_ahead")
         self.assertEqual(merged["uploads"], "held: the daily verification failed: x")
-        self.assertEqual(merged["lanes"], {"convert": "full_ahead", "describe": "stage_completed", "upload": "idle"})
+        self.assertEqual({lane: step["disposition"] for lane, step in merged["lanes"].items()},
+                         {"convert": "full_ahead", "describe": "stage_completed", "upload": "idle"})
 
     def test_lanes_without_a_wait_show_the_newest_step(self):
         merged = merge_worker_steps([self.step("stage_completed", "convert"), self.step("upload_completed", "upload")])
         self.assertEqual(merged["disposition"], "upload_completed")
+
+    def test_lanes_carry_their_own_wait_reason(self):
+        merged = merge_worker_steps([self.step("resource_wait", "describe", reason="15.2 GiB available, below 16 GiB, at /home/x/y")])
+        self.assertEqual(merged["lanes"], {"describe": {"disposition": "resource_wait", "reason": "15.2 GiB available, below 16 GiB, at [local file]"}})
+
+    def test_steps_from_before_a_restart_are_not_the_current_runs(self):
+        def entry(run, message):
+            return {"_SYSTEMD_INVOCATION_ID": run, "MESSAGE": message if isinstance(message, str) else json.dumps(message)}
+        entries = [entry("old", self.step("resource_wait", "convert", reason="interrupted by a service stop")),
+                   entry("new", self.step("idle", "upload")), entry("new", "not json"), entry("new", {"event": "carrier-pass"})]
+        self.assertEqual([event["lane"] for event in current_run_events(entries)], ["upload"])
+        self.assertEqual(current_run_events([entry("old", self.step("idle", "convert")), entry("new", "started")]), [])
+        self.assertEqual(current_run_events([]), [])
