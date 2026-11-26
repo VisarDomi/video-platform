@@ -123,3 +123,63 @@ of the old ledger is unchanged except the three tables that gain the uplink colu
 renamed allowance column, and the new tables and indexes equal a new ledger's
 (`private/scripts/ledger-schema18-check.mjs`). The public test still proves that a new
 schema-17 ledger upgrades to exactly a new schema-18 one.
+
+## A kept model that froze the local apps
+
+**Symptom.** A few hours after the worker's three lanes went live, the local apps stopped
+answering. The website's home page timed out after 15 seconds and a site's list after 8 seconds; a
+site's video list took 3.0 s, its changes feed 5.5 s and the pipeline dashboard 3.55 s. The
+description lane had spent three hours on one 506-second 1080p recording with the GPU idle,
+and llama-server held 24.18 GB of RAM.
+
+**Cause.** Two faults met. The lanes keep the description model loaded between recordings;
+before them, llama-server started and stopped for each description, which handed its memory
+back every time. Kept loaded, it grew for two reasons: it kept llama.cpp's default prompt
+cache in RAM, although every description's prompt is new, so the cache only held memory; and
+llama.cpp's video input decoded every frame of a video into RAM before it encoded the first
+one, about a thousand raw 1080p frames (some 6 GB) for this recording at 2 FPS. How the
+24.18 GB split between the two was not measured. The second fault: the server ran in the same
+systemd slice as the batch work, so when the slice passed its `MemoryHigh` (then 70%) the
+kernel throttled everything in it, the server included: memory pressure `full` 73.4% and
+1,792 socket throttles on that slice. Stopping the hung worker alone, before any code
+changed, brought the home page to 57 ms.
+
+**Fix.** llama-server runs with `--cache-ram 0` and requests send `cache_prompt: false`; a
+kept server above 10 GiB of RSS starts again before the next description (`descriptor-recycle`
+in the log), and a request gives up after 25 minutes. The pinned llama.cpp fork
+(`packages/descriptor/runtime/llama-cpp.lock.json`) decodes one frame at a time for models
+without temporal merging, Gemma among them, and reaps its ffmpeg and ffprobe children. The
+server has its own slice, `video-interactive.slice` (CPU weight 1000, I/O weight 500, 4 GiB
+high, 6 GiB max); the batch slice is 65% high, 75% max. Background finalization runs at most
+four ffmpeg checks, at nice 10, and segments are served with `sendFile`. On the same
+recording, llama-server then stayed at 7.74 to 7.90 GB with the GPU busy, and finished. With
+all three lanes busy: the home page 11–18 ms, the video list 12–36 ms, its changes feed
+9–25 ms, the site's list 14 ms, the dashboard 222 ms, and the file-host library's list
+9–11 ms (161 ms during the incident, 248 ms for its changes feed); memory pressure on the
+server's slice 0.00%, with no socket throttles. No test reproduces the growth: the RSS guard
+and the separate slice are what keep a model from freezing playback again.
+
+## A repair database that kept every playlist
+
+**Symptom.** In the same investigation, the server's finalization database had grown to
+203.2 MB, and every dashboard refresh and worker step scanned whole ledger tables.
+
+**Cause.** The journal of each repaired fMP4 recording kept, after publication, the original
+and repaired playlists and a hash of every source segment: what a repair needs until it is
+published, not after. 2,685 checkpoints still named folders deleted since. The ledger had no
+index for the queries each worker step and dashboard refresh run, and the dashboard counted
+its 14 days with one query per day plus one for the last 24 hours: 15 full scans of
+`state_events` per refresh. Healthy session keepalive rows were never deleted.
+
+**Fix.** A published journal keeps the repaired playlist's SHA-256 and the output receipts
+(version 2), enough to verify the published files on a later pass. A one-time compaction
+rewrote the 402 old journals, removed the stale checkpoints and vacuumed: 203.2 MB to
+8.2 MB. Ledger schema 19 adds 11 indexes and changes no table; `ANALYZE` ran once after the
+upgrade on the live ledger. Healthy keepalive rows older than 30 days are deleted (3,258 at
+the first pass); every failure stays. The dashboard reads its 14 days in one pass.
+`fmp4CaptureFinalization.test.mjs` checks that a published journal is version 2, with no
+playlists or segment hashes, and that a second pass leaves the recording unchanged;
+`ledgerSchema.test.mjs` upgrades a schema-18 ledger to exactly a new schema-19 one, and a
+SIGKILL in the middle of the upgrade leaves the old ledger whole. How much of the dashboard's
+gain came from the indexes and the one-pass query, apart from the end of the memory incident,
+was not measured.
