@@ -128,3 +128,26 @@ test('each job starts its own server and stops it when done, so nothing is held 
     assert.equal(starts.length,2,'the next job starts the server again');
     assert.notEqual(starts[0],starts[1]);
 });
+
+test('a job whose host stops ends at once, even while the model is still loading', async t=>{
+    const {llama,config,root}=await fixture(t,'loading',60000);
+    const modelUrl=descriptorConfig.modelUrl;
+    descriptorConfig.modelUrl=config.modelUrl;
+    t.after(()=>{ descriptorConfig.modelUrl=modelUrl; });
+    const text={title:'A title',description:'A description'};
+    const stop=new AbortController();
+    const job=rewriteAvoidingPhrases(text,['ace'],{server:llama,signal:stop.signal});
+    // Abort once the server is up and loading (answering 503), as a service stop would.
+    while (!(await fetch(`${config.modelUrl}/health`).then(r=>r.status===503,()=>false))) await new Promise(r=>setTimeout(r,20));
+    const stoppedAt=Date.now();
+    stop.abort();
+    await assert.rejects(job,/Descriptor startup was stopped/);
+    assert.ok(Date.now()-stoppedAt<5000,'it does not wait out the startup window');
+    assert.equal(llama.running,false);
+    await assert.rejects(fetch(`${config.modelUrl}/health`),'the loading server is stopped');
+
+    // A job that starts after the stop never starts the model.
+    await assert.rejects(rewriteAvoidingPhrases(text,['ace'],{server:llama,signal:stop.signal}),/abort/i);
+    const starts=(await readFile(path.join(root,'starts'),'utf8')).trim().split('\n');
+    assert.equal(starts.length,1);
+});

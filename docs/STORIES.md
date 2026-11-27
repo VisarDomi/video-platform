@@ -233,3 +233,19 @@ the model, which a description of many minutes absorbs; in exchange no memory is
 between jobs and growth inside a long-lived server cannot accumulate. The worker's
 description and upload lanes take turns at the model, because the server has one port. The
 memory ceiling and its `descriptor-recycle` event went with the kept server.
+
+## A worker stop that waited on a model still loading
+
+**Symptom.** Stopping the worker for a deploy took 90 seconds and ended with systemd killing
+it (`State 'stop-sigterm' timed out`); a description had started a minute before.
+
+**Cause.** Nothing told the description to stop. The worker waits for its lanes, the
+description lane was waiting for its model to become healthy, and `llama-server` ignores
+SIGTERM while it loads its model, so it would have run on for the whole load and the
+description after it.
+
+**Fix.** The descriptor takes an abort signal and stops its own server when it fires (a
+SIGKILL follows ten seconds after the SIGTERM); the pipeline passes its shutdown signal to
+every description and phrase rewrite. The job fails as interrupted and the recording keeps
+its state for the next start; a rewrite cut short this way is no longer taken as a failed
+rewrite that sends the recording back for a new description.

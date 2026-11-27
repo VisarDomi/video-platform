@@ -4,6 +4,7 @@ import type { ArtifactRecord } from "../domain/types.js";
 import { StageDeferredError, type DescriptionEvidence } from "../scheduler/orchestrator.js";
 import { isCounterclockwiseArtifact } from "./artifactNaming.js";
 import { sharedDescriptionModel } from "./descriptionModel.js";
+import { shutdownSignal } from "../shutdown.js";
 
 // The descriptor's llama-server holds about 11 GB of RAM while describing; on a
 // machine short of memory the kernel kills it and the stage would fail.
@@ -56,6 +57,8 @@ export async function describeValidatedArtifact(
     const describe = () => describeArtifact(artifact.path, {
         evidenceKey: artifact.sha256,
         avoidPhrases,
+        // A service stop ends the description (and its model, even one still loading) at once.
+        signal: shutdownSignal,
         // Only a description that is not cached starts the model server.
         beforeWork: async () => {
             const available = await availableMemoryBytes();

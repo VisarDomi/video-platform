@@ -33,6 +33,8 @@ export interface DescribeArtifactOptions {
     // Each description starts the managed server and stops it when it is done, so the
     // model holds no memory between jobs.
     readonly manageServer?: boolean;
+    // Aborted when the host stops: the managed server is stopped and the description fails.
+    readonly signal?: AbortSignal;
     readonly now?: () => Date;
     readonly evidenceKey?: string;
     // Called when the description is not cached, before any work starts (the
@@ -126,9 +128,11 @@ export async function describeArtifact(
     let staged: Awaited<ReturnType<typeof stageMedia>> | null = null;
     const server = options.server ?? new LlamaServer();
     const manageServer = options.manageServer ?? true;
+    const release = manageServer ? server.stopWhenAborted(options.signal) : () => undefined;
 
     try {
         staged = await stageMedia(upright?.path ?? mediaPath, descriptorConfig.mediaDirectory);
+        options.signal?.throwIfAborted();
         if (manageServer) await server.start();
         const request = () => requestDescription(staged!.url, fps, prompt);
         const result = await (manageServer ? server.requestWithRecovery(request) : request());
@@ -153,6 +157,7 @@ export async function describeArtifact(
     } finally {
         await staged?.remove();
         await upright?.remove();
+        release();
         if (manageServer) await server.stop();
     }
 }

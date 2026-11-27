@@ -151,3 +151,16 @@ test("the local model's rewrite is kept only when clean; otherwise the full re-d
     broken.db.recordRejectedPhrases("video-host", ["ace"], null);
     assert.equal((await settleRejectedPhrases(broken.db, broken.r.id, "video-host", new Date(), async () => { throw new Error("model down"); })).kind, "stale_description");
 });
+
+// Last in this file: it marks the process as stopping.
+test("a rewrite a service stop cuts short leaves the recording as it was, for the next start", async t => {
+    const { markStopping } = await import("../dist/shutdown.js");
+    const f = await fixture(t, { pending: false });
+    f.db.recordRejectedPhrases("video-host", ["ace"], null);
+    await assert.rejects(settleRejectedPhrases(f.db, f.r.id, "video-host", new Date(), async () => {
+        markStopping();
+        throw new Error("Descriptor startup was stopped");
+    }), /Descriptor startup was stopped/);
+    assert.equal(f.db.get(f.r.id).state, "metadata_ready", "not returned for re-description, not blocked");
+    assert.equal(f.db.get(f.r.id).blockReason ?? null, null);
+});

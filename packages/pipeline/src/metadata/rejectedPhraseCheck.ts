@@ -6,6 +6,7 @@ import { containedPhrases } from "../upload/providerWarnings.js";
 import { composeUploadMetadata } from "./composeUploadMetadata.js";
 import { contentProfile } from "../contentProfile.js";
 import { sharedDescriptionModel } from "../stages/descriptionModel.js";
+import { shutdownSignal } from "../shutdown.js";
 
 export type RejectedPhraseVerdict =
     | { kind: "clean" }
@@ -71,7 +72,7 @@ async function rewriteText(database: PipelineDatabase, recordingId: string, rewr
 // in turn with the descriptions).
 const rewriteWithModel: DescriptionRewriter = (text, phrases) => {
     const turns = sharedDescriptionModel();
-    const rewrite = () => rewriteAvoidingPhrases(text, phrases);
+    const rewrite = () => rewriteAvoidingPhrases(text, phrases, { signal: shutdownSignal });
     return turns ? turns.take(rewrite) : rewrite();
 };
 
@@ -87,6 +88,9 @@ export async function settleRejectedPhrases(
     if (verdict.kind === "clean") return verdict;
     if (rewrite) {
         const rewritten = await rewriteText(database, recordingId, rewrite, now).catch((error: unknown) => {
+            // A service stop cut the rewrite short: the recording keeps its state, and the
+            // upload resumes at the next start (no re-description, no review).
+            if (shutdownSignal.aborted) throw error;
             console.error(journalPriority("warn", 2) + JSON.stringify({ event: "description-rewrite-failed", recordingId, error: String(error) }));
             return false;
         });

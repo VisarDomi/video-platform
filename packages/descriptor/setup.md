@@ -5,7 +5,9 @@ single-artifact command. The pipeline calls its `describeArtifact()` and
 `rewriteAvoidingPhrases()` library entry points; the descriptor is neither the
 durable job owner nor a standalone daemon.
 Each call starts the managed `llama-server` for its job and stops it when the job is done,
-so the model holds no memory and no GPU between jobs.
+so the model holds no memory and no GPU between jobs. A call given an abort `signal` (the
+pipeline passes its shutdown signal) stops its server as soon as it fires, even one still
+loading its model, which ignores SIGTERM until it is loaded.
 
 Managed startup allows up to ten minutes for a slow model load, configurable
 with `DESCRIPTOR_STARTUP_TIMEOUT_MS`. Each health request is bounded to two

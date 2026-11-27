@@ -170,6 +170,16 @@ export class LlamaServer {
         return tail ? new Error(`${message}\nllama-server output (end):\n${tail}`, { cause: error }) : error instanceof Error ? error : new Error(message);
     }
 
+    // Stops the managed server when the signal aborts (its host stopping), so a job in flight,
+    // or a model still loading (llama-server ignores SIGTERM until its model is loaded), ends
+    // within the ten seconds stop() allows rather than running on. Returns the disposer.
+    stopWhenAborted(signal: AbortSignal | undefined): () => void {
+        if (!signal) return () => undefined;
+        const onAbort = () => { void this.stop(); };
+        signal.addEventListener("abort", onAbort, { once: true });
+        return () => signal.removeEventListener("abort", onAbort);
+    }
+
     async stop(): Promise<void> {
         this.stopping = true;
         await this.stopChild();
