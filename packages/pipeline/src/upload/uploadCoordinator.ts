@@ -2,6 +2,7 @@ import { UPLOAD_CHECK_MILLISECONDS } from "../db/pipelineDatabase.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { UploadOutcome, UploadRequest, ProviderUploader } from "./providerUploader.js";
 import { MetadataRejectedError, TransferAbortedBeforeSubmissionError, UploadTransportError } from "sdk";
+import { shutdownSignal } from "../shutdown.js";
 
 export { UploadTransportError };
 
@@ -29,6 +30,13 @@ export class UploadByteMeter {
 // How far back the destination is told about the videos this ledger created and believes
 // still exist, so a short uploads list can distinguish recent uploads from older missing ones.
 export const RECENT_UPLOADS_MILLISECONDS = 30 * 24 * 60 * 60_000;
+
+// An attempt's recorded error: what the uploader threw, and whether a service stop caused it
+// (the stop aborts the transfer, which then reads only "This operation was aborted").
+function failureMessage(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    return shutdownSignal.aborted ? `interrupted by a service stop: ${message}` : message;
+}
 
 export class UploadCoordinator {
     constructor(
@@ -85,7 +93,7 @@ export class UploadCoordinator {
                 this.database.finishUploadAttempt(attemptId, {
                     status: "failed",
                     transmittedBytes: this.database.getUploadProgress(attemptId).transmittedBytes,
-                    error: error.message,
+                    error: failureMessage(error),
                 }, new Date());
                 this.database.releaseRetryDeadline(attemptId);
                 throw error;
@@ -100,7 +108,7 @@ export class UploadCoordinator {
                 this.database.finishUploadAttempt(attemptId, {
                     status: "failed",
                     transmittedBytes: Math.max(transportError?.transmittedBytes ?? 0, progress.transmittedBytes),
-                    error: `${error instanceof Error ? error.message : String(error)} (before metadata submission; no video exists)`,
+                    error: `${failureMessage(error)} (before metadata submission; no video exists)`,
                 }, new Date());
                 this.database.releaseRetryDeadline(attemptId);
                 throw error;
@@ -115,7 +123,7 @@ export class UploadCoordinator {
             this.database.finishUploadAttempt(attemptId, {
                 status: acceptanceUnknown ? "uncertain" : "failed",
                 transmittedBytes: Math.max(transportError?.transmittedBytes ?? 0, progress.transmittedBytes),
-                error: error instanceof Error ? error.message : String(error),
+                error: failureMessage(error),
                 ...(acceptanceUnknown ? {
                     confirmation: {
                         confirmAfter: new Date(now.getTime() + 24 * 60 * 60_000),

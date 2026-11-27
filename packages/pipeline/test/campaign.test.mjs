@@ -661,3 +661,35 @@ test("prepare runs one named recording through the local stages to ready, never 
     assert.equal((await worker.prepare(recording.id)).state, "metadata_ready");
     assert.deepEqual(processed, [named.id]);
 });
+
+// Last in this file: a service stop cannot be undone in its process.
+test("an upload a service stop aborts waits for the next start: no failure streak, no cooldown", async t => {
+    const { markStopping } = await import("../dist/shutdown.js");
+    const { UploadCoordinator } = await import("../dist/upload/uploadCoordinator.js");
+    const { database, config, resolver, recording } = await campaignWorkerFixture(t);
+    database.setCampaignState("running");
+    const now = new Date("2026-11-26T03:02:02Z");
+    // What a deploy's stop does to a transfer in flight: the stop signal aborts its request.
+    const worker = new CampaignWorker(database, config, resolver, async (id) => {
+        const reservation = database.reserveUpload(id, 1_000, now);
+        await new UploadCoordinator(database, { async upload() {
+            markStopping();
+            throw new DOMException("This operation was aborted", "AbortError");
+        } }).uploadAdmitted(id, reservation, { recordingId: id, artifactPath: "/nonexistent.mp4", sizeBytes: 1_000,
+            title: "t", description: "d", tags: [], visibility: "private" }, now);
+    });
+    const result = await worker.step(now);
+    assert.equal(result.disposition, "resource_wait");
+    assert.match(result.reason, /interrupted by a service stop/);
+    const control = database.getCampaignControl();
+    assert.equal(control.state, "running");
+    assert.equal(control.resumeAt, null);
+    assert.equal(control.antibotFailures, 0);
+    assert.equal(database.get(recording.id).state, "metadata_ready");
+    assert.equal(database.canAttemptUpload(recording.id, new Date(now.getTime() + 60_000)), true);
+    const ledger = new DatabaseSync(path.join(path.dirname(config.finalizationDatabasePath), "pipeline.sqlite"), { readOnly: true });
+    const attempt = ledger.prepare("SELECT status, error FROM upload_attempts WHERE recording_id = ?").get(recording.id);
+    ledger.close();
+    assert.equal(attempt.status, "failed");
+    assert.match(attempt.error, /^interrupted by a service stop: This operation was aborted/);
+});

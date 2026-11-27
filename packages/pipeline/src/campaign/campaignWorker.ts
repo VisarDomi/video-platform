@@ -8,6 +8,7 @@ import type { CampaignControl, Recording, RecordingInput } from "../domain/types
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
 import { PipelineOrchestrator, StageDeferredError } from "../scheduler/orchestrator.js";
+import { stopRequested } from "../shutdown.js";
 import { createDefaultStages } from "../stages/defaultStages.js";
 import { captureKeyFromFolderName, selectOldestFinalizedEditedCandidate } from "./selectCandidate.js";
 import { sweepMissingRecordings } from "../commands/sweep.js";
@@ -275,6 +276,12 @@ export class CampaignWorker {
             // each failure in a row (the streak a successful upload resets);
             // an uncertain transfer is reconciled separately, never repeated.
             const afterFailure = this.database.get(uploadReady.id);
+            // A service stop (a deploy, a shutdown) aborted it: not the destination's or the
+            // network's fault, so no failure streak and no cooldown; the next start sends it.
+            if (afterFailure?.state === "metadata_ready" && await stopRequested()) {
+                return { disposition: "resource_wait", recordingId: uploadReady.id,
+                    reason: "interrupted by a service stop; resumed at the next start" };
+            }
             if (afterFailure?.state === "metadata_ready") {
                 const streak = control.antibotFailures + 1;
                 const waitMilliseconds = Math.min(24 * 60 * 60_000,
