@@ -219,3 +219,17 @@ pass the ceiling.
 **Fix.** The ceiling counts the memory the server holds, anonymous and shared, not the model
 files' pages; the recycle event logs both, and how many descriptions the server served, so
 its growth per description can be read from the journal.
+
+## The description model no longer stays loaded between jobs
+
+**Symptom.** With the ceiling fixed, the kept model still grew by about 2.4 GB of its own
+memory with each description and reached 9.8 GiB after two, so it would still have been
+started again every two or three descriptions, and between descriptions it held about 10 GB
+that conversion and the desktop could have used.
+
+**Decision.** Each description, and each phrase rewrite before an upload, starts the model
+for its job and stops it when the job is done. A start costs the 30 to 60 seconds of reading
+the model, which a description of many minutes absorbs; in exchange no memory is held
+between jobs and growth inside a long-lived server cannot accumulate. The worker's
+description and upload lanes take turns at the model, because the server has one port. The
+memory ceiling and its `descriptor-recycle` event went with the kept server.

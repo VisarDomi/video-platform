@@ -30,10 +30,9 @@ export interface DescribeArtifactOptions {
     // Phrases an upload provider rejected in earlier metadata. Appended to the
     // prompt so new descriptions avoid them; part of the prompt version.
     readonly avoidPhrases?: readonly string[];
+    // Each description starts the managed server and stops it when it is done, so the
+    // model holds no memory between jobs.
     readonly manageServer?: boolean;
-    // The managed server stays loaded after this description (started only if it is not
-    // running); the caller stops it.
-    readonly keepServer?: boolean;
     readonly now?: () => Date;
     readonly evidenceKey?: string;
     // Called when the description is not cached, before any work starts (the
@@ -130,7 +129,7 @@ export async function describeArtifact(
 
     try {
         staged = await stageMedia(upright?.path ?? mediaPath, descriptorConfig.mediaDirectory);
-        if (manageServer) await (options.keepServer ? server.ensureStarted() : server.start());
+        if (manageServer) await server.start();
         const request = () => requestDescription(staged!.url, fps, prompt);
         const result = await (manageServer ? server.requestWithRecovery(request) : request());
         await fs.mkdir(evidenceDirectory, { recursive: true });
@@ -154,6 +153,6 @@ export async function describeArtifact(
     } finally {
         await staged?.remove();
         await upright?.remove();
-        if (manageServer && !options.keepServer) await server.stop();
+        if (manageServer) await server.stop();
     }
 }

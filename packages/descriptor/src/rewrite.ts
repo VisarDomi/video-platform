@@ -20,13 +20,13 @@ export function rewritePrompt(text: DescriptionText, phrases: readonly string[])
 export async function rewriteAvoidingPhrases(
     text: DescriptionText,
     phrases: readonly string[],
-    // keepServer: the managed server stays loaded afterwards (see DescribeArtifactOptions).
-    options: { server?: LlamaServer; manageServer?: boolean; keepServer?: boolean } = {},
+    // Like a description, the managed server is started for this call and stopped after it.
+    options: { server?: LlamaServer; manageServer?: boolean } = {},
 ): Promise<DescriptionText> {
     const server = options.server ?? new LlamaServer();
     const manageServer = options.manageServer ?? true;
     try {
-        if (manageServer) await (options.keepServer ? server.ensureStarted() : server.start());
+        if (manageServer) await server.start();
         const request = () => postJson(new URL("/v1/chat/completions", descriptorConfig.modelUrl), {
             model: descriptorConfig.requestModel,
             messages: [{ role: "user", content: [{ type: "text", text: rewritePrompt(text, phrases) }] }],
@@ -46,6 +46,6 @@ export async function rewriteAvoidingPhrases(
         if (typeof parsed.title !== "string" || typeof parsed.description !== "string") throw new Error("Rewrite returned no title/description");
         return { title: parsed.title.trim(), description: parsed.description.trim() };
     } finally {
-        if (manageServer && !options.keepServer) await server.stop();
+        if (manageServer) await server.stop();
     }
 }

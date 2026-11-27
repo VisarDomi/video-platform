@@ -206,9 +206,9 @@ before the new artifact is produced. This does not rewrite published copies,
 alter remote ledger evidence, or enable automatic cleanup.
 
 A description that is not cached starts the descriptor's llama-server, which holds
-about 11 GB of RAM. The worker with three lanes (below) keeps it loaded between
-descriptions, and the upload's phrase rewrite uses the same server, one request at a
-time; a manual pause or a stop unloads it. The describe stage first waits until the machine has
+about 11 GB of RAM, and stops it when the description is written: the model holds no
+memory between jobs. The upload's phrase rewrite starts and stops it the same way; in the
+worker with three lanes (below) the two take turns, since the server has one port. The describe stage first waits until the machine has
 `VIDEO_PIPELINE_DESCRIBE_MIN_MEMORY_GIB` (default 16) GiB available: until then the
 campaign step is `resource_wait`, retried every 30 seconds, and the recording
 keeps its state. Started on a machine short of memory, the server is killed by

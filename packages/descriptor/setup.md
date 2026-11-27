@@ -4,6 +4,8 @@ This package contains the local native-video descriptor engine and a manual
 single-artifact command. The pipeline calls its `describeArtifact()` and
 `rewriteAvoidingPhrases()` library entry points; the descriptor is neither the
 durable job owner nor a standalone daemon.
+Each call starts the managed `llama-server` for its job and stops it when the job is done,
+so the model holds no memory and no GPU between jobs.
 
 Managed startup allows up to ten minutes for a slow model load, configurable
 with `DESCRIPTOR_STARTUP_TIMEOUT_MS`. Each health request is bounded to two
@@ -95,10 +97,6 @@ Relevant tuning variables:
 - `DESCRIPTOR_VIDEO_TOKEN_BUDGET` (default `115000`)
 - `DESCRIPTOR_TOKENS_PER_FRAME` (default `70.5`)
 - `DESCRIPTOR_STARTUP_TIMEOUT_MS` (default `600000`)
-- `DESCRIPTOR_MAX_ANON_GIB` (default `10`): a server kept loaded between descriptions starts
-  again before the next one once its anonymous and shared memory passes this
-  (`descriptor-recycle` in the journal, with its memory split and the descriptions it
-  served); the model files' mapped pages are page cache and do not count
 - `DESCRIPTOR_MODEL_URL` (external server) or `DESCRIPTOR_MODEL_PORT` (managed, default `7976`)
 - `DESCRIPTOR_LLAMA_SERVER`, `DESCRIPTOR_MODEL_PATH`, `DESCRIPTOR_MMPROJ_PATH`,
   `DESCRIPTOR_TEMPLATE_PATH`, `DESCRIPTOR_PROMPT_PATH`, `DESCRIPTOR_MEDIA_PATH`

@@ -17,7 +17,7 @@ import { AccountSlot } from "../campaign/accountSlot.js";
 import { runCarrierLane } from "../uplink/carrierLane.js";
 import { runOfficeLane } from "../uplink/officeLane.js";
 import type { CampaignLane } from "../campaign/campaignWorker.js";
-import { keepDescriptionModelLoaded } from "../stages/descriptionModel.js";
+import { shareDescriptionModel } from "../stages/descriptionModel.js";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
 // Well inside common PHP session idle limits; one light request each time.
@@ -240,9 +240,10 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     const reconcileOutcomes = new Map<string, string>();
     const wakeup = new LaneWakeup();
     // With a second uplink, conversion, description and upload each run in their own lane,
-    // on their own recording, at the same time; the model stays loaded between descriptions
-    // (unloaded by a manual pause). Without one, one serial loop takes whichever step is due.
-    const model = config.uplink ? keepDescriptionModelLoaded() : null;
+    // on their own recording, at the same time; the description and the upload's phrase
+    // rewrite take turns at the model, which each starts and stops for its job. Without one,
+    // one serial loop takes whichever step is due.
+    if (config.uplink) shareDescriptionModel();
     const lane = async (name: CampaignLane | undefined): Promise<void> => {
         let lastStep = "";
         let waitingForRecovery = false;
@@ -288,8 +289,6 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
                 const notice = stepNotification(result.step as Parameters<typeof stepNotification>[0]);
                 if (notice) notifyDesktop(notice.title, notice.body, notice.urgent);
                 const disposition = result.step?.disposition;
-                // A manual pause frees the GPU and the memory the model holds.
-                if (name === "describe" && disposition === "paused" && model?.loaded) await model.unload();
                 if ((disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown" || disposition === "upload_retry_cooldown")
                     && result.step?.resumeAt && !config.uplink) {
                     const resumeAt = Date.parse(result.step.resumeAt);
@@ -314,7 +313,6 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         }
     };
     await Promise.all(config.uplink ? [lane("convert"), lane("describe"), lane("upload")] : [lane(undefined)]);
-    await model?.unload();
     // A copy in progress ends at its next step (a killed one leaves only a .partial file,
     // which the next pass deletes).
     await Promise.all([carrierLane, officeLane]);
