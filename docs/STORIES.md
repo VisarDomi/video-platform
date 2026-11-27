@@ -183,3 +183,39 @@ playlists or segment hashes, and that a second pass leaves the recording unchang
 SIGKILL in the middle of the upgrade leaves the old ledger whole. How much of the dashboard's
 gain came from the indexes and the one-pass query, apart from the end of the memory incident,
 was not measured.
+
+## One segment the site never served, and the ones after it
+
+**Symptom.** On one live site, a few times a week, a recording missed 1 to 17 segments in a
+row, each time just after a `segment download failed — stopping` warning for a 404: the
+site listed a segment in its live playlist and answered 404 for it, on every request.
+
+**Cause.** A 404 ended the capture attempt. The session then waited 5 seconds, asked the
+site again and fetched the playlist from the start: 6 to 17 seconds in all, while the
+site's live window holds about six seconds. By then the segments after the missing one had
+left the window, and requests already made for them were cancelled with the attempt.
+
+**Fix.** A listed segment answered with 404 or 410 is fetched once more on the next poll,
+then left out (counted as missed, `SEGMENT-UNAVAILABLE`) while the media after it is saved.
+A 404 on the last listed segment, three in a row, or any other refusal still end the
+attempt, so a stream that ended or a token that expired gets a fresh start. A gap line now
+also names the playlist polls that got no playlist since the last good one: the same site's
+playlist answered 404 for 10 to 16 seconds twice in one day, which the line had reported as
+a loop that "polled too late". The tests replay a three-segment window that moves every
+second with one segment that never answers.
+
+## A kept model started again after nearly every description
+
+**Symptom.** The description model, kept loaded between descriptions, was stopped and
+started 36 times in one day (`descriptor-recycle`), each start reading the model from disk
+again for 30 to 60 seconds.
+
+**Cause.** Its memory ceiling, 10 GiB, was compared with the process's whole resident set.
+A freshly started server already held 9.95 GB of it: 6.05 GB of its own memory and 3.82 GB
+of pages mapped from the model files, which are page cache the kernel can take back. Each
+description then added up to about 1 GB of its own memory, so one description was enough to
+pass the ceiling.
+
+**Fix.** The ceiling counts the memory the server holds, anonymous and shared, not the model
+files' pages; the recycle event logs both, and how many descriptions the server served, so
+its growth per description can be read from the journal.
