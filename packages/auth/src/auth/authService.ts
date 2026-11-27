@@ -1,7 +1,7 @@
 import * as timersPromises from "timers/promises";
 
 import type { AuthDecision, Logger, ShortTokens, SiteAuth, TokenBag } from "sdk";
-import { CredentialStore, taggedLogger } from "shared";
+import { CredentialStore, diskPressureSummary, taggedLogger } from "shared";
 import logger from "../common/logger.js";
 import { getConfig } from "../common/config.js";
 import { AuthContext } from "./authContext.js";
@@ -273,7 +273,9 @@ export class AuthService {
                 const totalMs = savedAt - startedAt;
                 if (totalMs >= Math.round(this.provider.intervals.shortTokenRefresh * 0.6)) {
                     const bag = this.authContext.getTokenBag();
-                    this.siteLog.warn(`Slow short-refresh for ${this.account.email}: total=${totalMs}ms (fetch=${fetchMs}ms, save=${saveMs}ms) — ${bag ? this.provider.describeTokens(bag).summary : this.noTokensSummary()}`);
+                    // A slow save is the disk's: say what it was doing.
+                    const disk = saveMs >= fetchMs ? ` disk: ${await diskPressureSummary()}` : "";
+                    this.siteLog.warn(`Slow short-refresh for ${this.account.email}: total=${totalMs}ms (fetch=${fetchMs}ms, save=${saveMs}ms)${disk} — ${bag ? this.provider.describeTokens(bag).summary : this.noTokensSummary()}`);
                 }
                 consecutiveOk++;
                 if (!wasHealthy) {

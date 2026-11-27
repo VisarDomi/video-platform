@@ -26,3 +26,4 @@ export type {
     UploadLimits,
     UploadNotification,
 } from "./uploadPlanner.js";
+export { diskPressureSummary } from "./diskPressure.js";
