@@ -103,6 +103,19 @@ fetches it again while the live window still lists it. After 5 rejections
 moves past it, and the next saved segment gets a sequence-gap discontinuity.
 An upstream ENDLIST is acted on only after a pending refetch is resolved.
 
+A listed segment the provider answers 404 or 410 for is handled the same way, with a
+tighter bound: it is fetched again on the next poll, and after 2 attempts
+(`UNAVAILABLE_SEGMENT_MAX_ATTEMPTS`) it is left out while the media after it is saved. It
+counts as a missed segment, logged as a `SEGMENT-UNAVAILABLE` warning. Ending the attempt
+instead would restart the session, which takes seconds; a short live window moves past the
+segments after it meanwhile. A 404 on the last listed segment, a run of 3 such segments
+(`UNAVAILABLE_SEGMENT_MAX_RUN`), or any other refusal (a 403 for an expired token) still
+ends the attempt, so the session can fetch the stream again.
+
+A gap line reports the playlist polls since the last good one that got no playlist
+(`failedPlaylistPolls=http-404x4`): the provider's playlist was unavailable, so the loop
+was not late even though `sincePreviousPoll` is long.
+
 Validators: ts-live and ladder-live require a nonempty file and probe its dimensions with
 ffprobe; unknown dimensions keep the segment with an input boundary. fmp4-live requires
 a readable fragment whose index addresses only its own mdat and lists no

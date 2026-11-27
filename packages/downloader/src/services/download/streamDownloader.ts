@@ -21,6 +21,14 @@ export type ExitReason = import("../core/interfaces.js").DownloadExitContext["ex
 // window that stops moving (ENDLIST, stalled edge) from blocking later media.
 export const REJECTED_SEGMENT_MAX_ATTEMPTS = 5;
 
+// A listed segment the provider answers 404/410 for is fetched once more on the next poll,
+// then left out while the media after it is saved: ending the loop would restart the session
+// (seconds), and a short live window moves past the segments after it meanwhile. A run of
+// such segments, or one with nothing listed after it, still ends the loop (a stream that
+// ended or moved).
+export const UNAVAILABLE_SEGMENT_MAX_ATTEMPTS = 2;
+export const UNAVAILABLE_SEGMENT_MAX_RUN = 3;
+
 export interface DownloadResult {
     segmentCount: number;
     aborted: boolean;
@@ -342,6 +350,11 @@ export class StreamDownloader {
 
         // The slowest disk steps since the last regular poll, for a late poll's gap line.
         let diskTimings = { write: 0, check: 0, append: 0 };
+        // Listed segments left out in a row because the provider never served them.
+        let unavailableRun = 0;
+        // Playlist polls that got no playlist since the last one that did (a gap line reports
+        // them: the provider's playlist was unavailable, the loop was not late).
+        const failedPlaylistPolls = new Map<string, number>();
         downloadLoop: while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
             if (health === 'ok' && Date.now() - lastDownload > HEARTBEAT_INTERVAL_MS) {
                 health = 'stale';
@@ -384,6 +397,8 @@ export class StreamDownloader {
             if (!content) {
                 const failure = session.getLastPlaylistFailure?.();
                 if (failure) this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, failure);
+                const failureKind = failure ? (failure.kind === "http" ? `http-${failure.status}` : failure.kind) : "no-answer";
+                failedPlaylistPolls.set(failureKind, (failedPlaylistPolls.get(failureKind) ?? 0) + 1);
                 // Rate limited: the same playlist answers again shortly. Variant
                 // recovery would add requests, and its 5-second pause lets the
                 // window move past segments.
@@ -451,9 +466,12 @@ export class StreamDownloader {
                 content,
                 (line) => resolveSegmentUrl(liveUrl, line),
                 undefined,
-                `playlistFetch=${playlistFetchMs}ms slowestWrite=${diskTimings.write}ms slowestCheck=${diskTimings.check}ms slowestAppend=${diskTimings.append}ms`,
+                `playlistFetch=${playlistFetchMs}ms slowestWrite=${diskTimings.write}ms slowestCheck=${diskTimings.check}ms slowestAppend=${diskTimings.append}ms`
+                    + (failedPlaylistPolls.size > 0
+                        ? ` failedPlaylistPolls=${[...failedPlaylistPolls].map(([kind, count]) => `${kind}x${count}`).join(",")}` : ""),
             );
             diskTimings = { write: 0, check: 0, append: 0 };
+            failedPlaylistPolls.clear();
             const segments = identifiedSegments.filter(segment => !playlistManager.shouldSkipByTimeline(segment));
 
             let downloadedThisIteration = false;
@@ -494,6 +512,25 @@ export class StreamDownloader {
                                 kind: "http",
                                 status: fetchResult.status,
                             });
+                        }
+                        const status = fetchResult.status;
+                        if ((status === 404 || status === 410) && index < segments.length - 1 && unavailableRun < UNAVAILABLE_SEGMENT_MAX_RUN) {
+                            const attempts = playlistManager.noteRejectedSegment(segment.providerSequence);
+                            const details = {
+                                segment: segment.localName,
+                                providerSequence: segment.providerSequence,
+                                status,
+                                attempt: attempts,
+                                maxAttempts: UNAVAILABLE_SEGMENT_MAX_ATTEMPTS,
+                            };
+                            if (attempts < UNAVAILABLE_SEGMENT_MAX_ATTEMPTS) {
+                                logger.warn(`[StreamDownloader] ${alias} segment unavailable — refetching on the next poll`, details);
+                                rejectedRetryPending = true;
+                                break;
+                            }
+                            unavailableRun++;
+                            playlistManager.abandonUnavailableSegment(segment.providerSequence, status);
+                            continue;
                         }
                         logger.warn(`[StreamDownloader] ${alias} segment download failed — stopping`, {
                             segment: segment.localName,
@@ -588,6 +625,7 @@ export class StreamDownloader {
                             logger.debug(`[StreamDownloader] RECOVERED ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
                         }
                         lastDownload = Date.now();
+                        unavailableRun = 0;
                         initTracker.incrementSegmentCount();
                         downloadedThisIteration = true;
                     }

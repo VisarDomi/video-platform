@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { REJECTED_SEGMENT_MAX_ATTEMPTS, StreamDownloader } from '../dist/services/download/streamDownloader.js';
+import { REJECTED_SEGMENT_MAX_ATTEMPTS, StreamDownloader, UNAVAILABLE_SEGMENT_MAX_ATTEMPTS, UNAVAILABLE_SEGMENT_MAX_RUN } from '../dist/services/download/streamDownloader.js';
 import { PlaylistManager } from '../dist/services/download/playlistManager.js';
 import { DiskSession } from '../dist/services/download/diskSession.js';
 import { InitTracker } from '../dist/services/download/initTracker.js';
@@ -275,8 +275,9 @@ test('a written segment the provider cannot read stays on disk and is fetched ag
 
 test('a terminal segment failure cancels unused requests before the recording retries',async t=>{
     let cancelled=false;
+    // Refused access (an expired token) needs a fresh session: it ends the loop.
     const f=await fixture(t,async(url,signal)=>{
-        if(url.endsWith('/a.ts'))return{data:null,retryable:false,status:404};
+        if(url.endsWith('/a.ts'))return{data:null,retryable:false,status:403};
         return await new Promise(resolve=>{
             const timer=setTimeout(()=>resolve({data:null,retryable:true}),1200);
             signal?.addEventListener('abort',()=>{cancelled=true;clearTimeout(timer);resolve({data:null,retryable:true});},{once:true});
@@ -373,4 +374,73 @@ test('a segment 404 after a new init map URL leaves no unreferenced init file on
     const saved = await readFile(path.join(root, 'playlist.m3u8'), 'utf8');
     const referencedInits = [...saved.matchAll(/#EXT-X-MAP:URI="([^"]+)"/g)].map(match => match[1]).sort();
     assert.deepEqual(files, referencedInits);
+});
+
+// What a live site's CDN does now and then: a listed segment answers 404 on every request
+// while the ones after it are served. The loop used to end on it, and the session's restart
+// took long enough for the short live window to move past the segments after it.
+test('a listed segment the provider answers 404 for is fetched once more, then left out while later media is saved', { timeout: 15000 }, async (t) => {
+    const started = Date.now();
+    const window = (first, ended = false) => `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${first}\n`
+        + [first, first + 1, first + 2].map(sequence => `#EXTINF:1,\ns${sequence}.ts\n`).join('') + (ended ? '#EXT-X-ENDLIST\n' : '');
+    // A three-segment window that moves on every second, like the sites' short live windows.
+    const playlistAt = () => {
+        const moved = Math.floor((Date.now() - started) / 1000);
+        return moved >= 3 ? window(13, true) : window(10 + moved);
+    };
+    const requests = [];
+    const fetchSegment = async (url) => {
+        requests.push(path.basename(url));
+        if (url.endsWith('/s11.ts')) return { data: null, retryable: false, status: 404 };
+        return { data: Buffer.from(`unprobeable media: ${url}`) };
+    };
+    const f = await fixture(t, fetchSegment);
+    f.provider.createDownloadSession = () => ({ fetchPlaylist: async () => playlistAt(), fetchSegment });
+    const result = await f.run();
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(requests.filter(name => name === 's11.ts').length, UNAVAILABLE_SEGMENT_MAX_ATTEMPTS);
+    const saved = (await readFile(path.join(f.root, 'playlist.m3u8'), 'utf8')).split('\n');
+    const sequences = saved.filter(line => line.endsWith('.ts')).map(line => Number(line.match(/_(\d+)\.ts$/)[1]));
+    assert.deepEqual(sequences, [10, 12, 13, 14, 15], 'every served segment saved, the unavailable one left out');
+    // The hole is marked for players and counted as missed.
+    assert.equal(saved[saved.findIndex(line => line.endsWith('_12.ts')) - 2], '#EXT-X-DISCONTINUITY');
+    assert.equal(f.manager.missedSegmentCount, 1);
+});
+
+test('a run of unavailable segments, or one with nothing listed after it, still ends the loop', async (t) => {
+    const lastOnly = await fixture(t, async (url) => url.endsWith('/b.ts')
+        ? { data: null, retryable: false, status: 404 } : { data: Buffer.from(`media: ${url}`) });
+    assert.equal((await lastOnly.run()).exitReason, 'segment-failed');
+    const runLength = UNAVAILABLE_SEGMENT_MAX_RUN + 2;
+    const all = `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n`
+        + Array.from({ length: runLength }, (_, index) => `#EXTINF:1,\nu${index}.ts\n`).join('') + '#EXT-X-ENDLIST\n';
+    const gone = await fixture(t, async () => ({ data: null, retryable: false, status: 404 }));
+    gone.provider.createDownloadSession = () => ({ fetchPlaylist: async () => all,
+        fetchSegment: async () => ({ data: null, retryable: false, status: 404 }) });
+    assert.equal((await gone.run()).exitReason, 'segment-failed');
+    assert.equal(gone.manager.missedSegmentCount, UNAVAILABLE_SEGMENT_MAX_RUN);
+});
+
+// The site's live playlist answering 404 for seconds while the stream goes on: the window
+// moves past segments meanwhile. The gap line says the polls failed, not that none was made.
+test('a gap after polls that got no playlist names those failures', { timeout: 15000 }, async (t) => {
+    const logger = (await import('../dist/common/logger.js')).default;
+    const lines = [];
+    t.mock.method(logger, 'log', (level, message) => lines.push([level, message]));
+    const window = (first, ended = false) => `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${first}\n`
+        + [first, first + 1].map(sequence => `#EXTINF:1,\ns${sequence}.ts\n`).join('') + (ended ? '#EXT-X-ENDLIST\n' : '');
+    let polls = 0;
+    const f = await fixture(t, async (url) => ({ data: Buffer.from(`unprobeable media: ${url}`) }));
+    f.provider.playlistRetryMs = 10;
+    f.provider.recoverVariant = async () => null;
+    f.provider.createDownloadSession = () => ({
+        fetchPlaylist: async () => { polls++; return polls === 1 ? window(10) : polls <= 4 ? null : window(15, true); },
+        getLastPlaylistFailure: () => ({ kind: 'http', status: 404 }),
+        fetchSegment: async (url) => ({ data: Buffer.from(`unprobeable media: ${url}`) }),
+    });
+    assert.equal((await f.run()).exitReason, 'remote-endlist');
+    const gap = lines.find(([, message]) => message.includes('SEQUENCE-GAP'));
+    assert.ok(gap, 'the gap is logged');
+    assert.match(gap[1], /missing=12-14 \(3 segments\)/);
+    assert.match(gap[1], /failedPlaylistPolls=http-404x3/);
 });

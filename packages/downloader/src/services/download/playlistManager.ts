@@ -386,6 +386,17 @@ export class PlaylistManager {
         this.baselineProviderSequence = providerSequence;
     }
 
+    // Gives up on a listed sequence the provider kept answering 404/410 for, so the media
+    // after it is saved before the live window moves past it. Its media is missing from the
+    // recording: counted and logged like a gap this loop could not fill (the next committed
+    // segment gets a sequence-gap boundary).
+    public abandonUnavailableSegment(providerSequence: number, status: number): void {
+        this.rejectedAttempts.delete(providerSequence);
+        this.baselineProviderSequence = providerSequence;
+        this._missedSegmentCount++;
+        logger.warn(`[PlaylistManager] SEGMENT-UNAVAILABLE recording=${this.recordingId} missing=${providerSequence}-${providerSequence} (1 segments) status=${status}: the provider listed it but did not serve it; continuing with the next segment`);
+    }
+
     // The copy (CDN edge) now being read, as the site names it; null keeps the current one.
     public setEdge(edge: string | null): void {
         if (edge) {
