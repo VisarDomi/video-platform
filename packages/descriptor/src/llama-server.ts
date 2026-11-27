@@ -4,17 +4,39 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { descriptorConfig } from "./config.js";
 
-// Recycle a long-lived llama-server between descriptions if its resident RAM ever climbs
-// past this threshold (default 10 GiB; Gemma-4 E4B Q8 + vision projector normally sits
-// around 2-4 GiB host RSS with --cache-ram 0).
-const MAX_KEPT_SERVER_RSS_BYTES = Number(process.env.DESCRIPTOR_MAX_RSS_GIB ?? 10) * 2 ** 30;
+// Recycle a long-lived llama-server between descriptions once the memory it holds climbs
+// past this ceiling (default 10 GiB). What it holds is its anonymous and shared memory: the
+// pages it maps from the model files (RssFile, about 3.7 GiB for Gemma-4 E4B Q8 and its
+// projector) are page cache the kernel can reclaim, so they are not counted. Started, it
+// holds about 5.9 GiB, and each description of a video adds up to about 1 GiB.
+const MAX_KEPT_SERVER_MEMORY_BYTES = Number(process.env.DESCRIPTOR_MAX_ANON_GIB ?? 10) * 2 ** 30;
 const STALE_MEDIA_AGE_MS = 24 * 60 * 60_000;
 
-async function readProcessRssBytes(pid: number): Promise<number | null> {
-    try {
-        const status = await readFile(`/proc/${pid}/status`, "utf8");
-        const match = status.match(/^VmRSS:\s+(\d+)\s+kB/m);
+export interface ProcessMemory {
+    // Anonymous plus shared memory: what the process holds.
+    readonly heldBytes: number;
+    readonly anonBytes: number;
+    readonly fileBytes: number;
+    readonly rssBytes: number;
+}
+
+// A process's memory from its /proc/<pid>/status text.
+export function parseProcessMemory(status: string): ProcessMemory | null {
+    const kib = (field: string) => {
+        const match = status.match(new RegExp(`^${field}:\\s+(\\d+)\\s+kB`, "m"));
         return match ? Number(match[1]) * 1024 : null;
+    };
+    const anonBytes = kib("RssAnon");
+    const fileBytes = kib("RssFile");
+    const shmemBytes = kib("RssShmem");
+    const rssBytes = kib("VmRSS");
+    if (anonBytes === null || fileBytes === null || shmemBytes === null || rssBytes === null) return null;
+    return { heldBytes: anonBytes + shmemBytes, anonBytes, fileBytes, rssBytes };
+}
+
+async function readProcessMemory(pid: number): Promise<ProcessMemory | null> {
+    try {
+        return parseProcessMemory(await readFile(`/proc/${pid}/status`, "utf8"));
     } catch {
         return null;
     }
@@ -63,10 +85,13 @@ export class LlamaServer {
     private logTail = "";
     private failureLines: string[] = [];
     private stopping = false;
+    // Descriptions the running server was started or kept for.
+    private descriptions = 0;
 
     constructor(
         private readonly config = descriptorConfig,
         private readonly progressIntervalMilliseconds = 30_000,
+        private readonly maxKeptMemoryBytes = MAX_KEPT_SERVER_MEMORY_BYTES,
     ) {
         for (const value of [config.startupTimeoutMilliseconds, config.healthRequestTimeoutMilliseconds]) {
             if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Descriptor timeouts must be positive integers");
@@ -79,29 +104,32 @@ export class LlamaServer {
     }
 
     // Starts the server unless this instance's process is already up: a server kept loaded
-    // between descriptions. One that died meanwhile, or whose host RSS drifted past the
-    // safety ceiling, is started fresh.
+    // between descriptions. One that died meanwhile, or that holds more memory than the
+    // safety ceiling, is started fresh (descriptor-recycle in the journal, with how many
+    // descriptions it served, so its growth per description can be read).
     async ensureStarted(): Promise<void> {
         if (this.running) {
             const pid = this.child?.pid;
-            if (pid && !this.config.useExternalServer && Number.isFinite(MAX_KEPT_SERVER_RSS_BYTES) && MAX_KEPT_SERVER_RSS_BYTES > 0) {
-                const rss = await readProcessRssBytes(pid);
-                if (rss !== null && rss > MAX_KEPT_SERVER_RSS_BYTES) {
-                    console.log(JSON.stringify({ event: "descriptor-recycle", reason: "rss_ceiling", rssBytes: rss, limitBytes: MAX_KEPT_SERVER_RSS_BYTES }));
+            if (pid && !this.config.useExternalServer && Number.isFinite(this.maxKeptMemoryBytes) && this.maxKeptMemoryBytes > 0) {
+                const memory = await readProcessMemory(pid);
+                if (memory !== null && memory.heldBytes > this.maxKeptMemoryBytes) {
+                    console.log(JSON.stringify({ event: "descriptor-recycle", reason: "memory_ceiling", ...memory,
+                        limitBytes: this.maxKeptMemoryBytes, descriptionsServed: this.descriptions }));
                     await this.stopChild();
                     await this.start();
-                    return;
                 }
             }
-            return;
+        } else {
+            if (this.child) await this.stopChild();
+            await this.start();
         }
-        if (this.child) await this.stopChild();
-        await this.start();
+        this.descriptions++;
     }
 
     async start(): Promise<void> {
         if (this.child) throw new Error("llama-server is already managed by this instance");
         this.stopping = false;
+        this.descriptions = 0;
         this.launchError = null;
         this.logTail = "";
         this.failureLines = [];

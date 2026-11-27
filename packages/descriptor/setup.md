@@ -84,8 +84,8 @@ npm run describe-one:bounded -w descriptor -- "/path/to/video.mp4"
 ```
 
 It runs the descriptor in a transient user scope inside
-`video-processing.slice`, which starts memory reclaim at 70% of physical RAM,
-hard-limits it at 80%, denies swap, and caps writes at 50 MB/s (see the processing
+`video-processing.slice`, which starts memory reclaim at 65% of physical RAM,
+hard-limits it at 75%, denies swap, and caps writes at 50 MB/s (see the processing
 slice, `systemd/user/video-processing.slice`). Exceeding the memory ceiling
 terminates work in the slice rather than exhausting host RAM and swap.
 
@@ -95,6 +95,10 @@ Relevant tuning variables:
 - `DESCRIPTOR_VIDEO_TOKEN_BUDGET` (default `115000`)
 - `DESCRIPTOR_TOKENS_PER_FRAME` (default `70.5`)
 - `DESCRIPTOR_STARTUP_TIMEOUT_MS` (default `600000`)
+- `DESCRIPTOR_MAX_ANON_GIB` (default `10`): a server kept loaded between descriptions starts
+  again before the next one once its anonymous and shared memory passes this
+  (`descriptor-recycle` in the journal, with its memory split and the descriptions it
+  served); the model files' mapped pages are page cache and do not count
 - `DESCRIPTOR_MODEL_URL` (external server) or `DESCRIPTOR_MODEL_PORT` (managed, default `7976`)
 - `DESCRIPTOR_LLAMA_SERVER`, `DESCRIPTOR_MODEL_PATH`, `DESCRIPTOR_MMPROJ_PATH`,
   `DESCRIPTOR_TEMPLATE_PATH`, `DESCRIPTOR_PROMPT_PATH`, `DESCRIPTOR_MEDIA_PATH`

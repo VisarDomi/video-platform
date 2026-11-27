@@ -4,10 +4,10 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { DescriptorStartupError, LlamaServer } from '../dist/llama-server.js';
+import { DescriptorStartupError, LlamaServer, parseProcessMemory } from '../dist/llama-server.js';
 import { descriptorConfig } from '../dist/config.js';
 
-async function fixture(t, scenario, timeout = 2000) {
+async function fixture(t, scenario, timeout = 2000, maxKeptMemoryBytes) {
     const root = await mkdtemp(path.join(os.tmpdir(), 'descriptor-lifecycle-'));
     t.after(()=>rm(root,{recursive:true,force:true}));
     const server = http.createServer();
@@ -22,8 +22,10 @@ if(scenario==='exit') { console.error('fixture model load failure'); process.exi
 if(scenario==='signal') { process.kill(process.pid,'SIGTERM'); }
 const port = Number(process.argv[process.argv.indexOf('--port')+1]);
 const start = Date.now();
+const held = [];
 const server = http.createServer((req,res)=> {
   if(scenario==='hang') return;
+  if(req.url==='/grow') { held.push(Buffer.alloc(64*2**20, 1)); res.end('{}'); return; }
   const ready = scenario==='slow' ? Date.now()-start>=700 : scenario==='ready';
   res.writeHead(ready ? 200 : 503); res.end('{}');
 });
@@ -34,7 +36,7 @@ process.on('SIGTERM',()=>{server.closeAllConnections();server.close(()=>process.
     const config = { ...descriptorConfig, runtimeExecutable: executable, modelPath: scenario, port,
         modelUrl: `http://127.0.0.1:${port}`, startupTimeoutMilliseconds: timeout,
         healthRequestTimeoutMilliseconds: 50, useExternalServer: false };
-    const llama = new LlamaServer(config);
+    const llama = new LlamaServer(config, undefined, maxKeptMemoryBytes);
     t.after(()=>llama.stop());
     return { llama, config };
 }
@@ -123,4 +125,40 @@ test('a server kept loaded starts once, is reused, and starts again after it die
     assert.equal((await fetch(`${config.modelUrl}/health`)).status,200);
     await llama.stop();
     assert.equal(llama.running,false);
+});
+
+// The status of a freshly started description server: 9.95 GB resident, 3.7 GB of it the
+// model files' page cache. Counted by VmRSS it was already at a 10 GiB ceiling, so it
+// started again after nearly every description.
+const startedServerStatus = `Name:\tllama-server
+VmRSS:\t 9950716 kB
+RssAnon:\t 6045600 kB
+RssFile:\t 3818000 kB
+RssShmem:\t   87116 kB
+`;
+test('the memory a kept server holds is its anonymous and shared memory, not the model files it maps', () => {
+    const memory = parseProcessMemory(startedServerStatus);
+    assert.deepEqual(memory, { heldBytes: (6045600 + 87116) * 1024, anonBytes: 6045600 * 1024,
+        fileBytes: 3818000 * 1024, rssBytes: 9950716 * 1024 });
+    assert.ok(memory.heldBytes < 10 * 2 ** 30 && memory.rssBytes > 9 * 2 ** 30);
+    assert.equal(parseProcessMemory('Name:\tkernel-thread\n'), null);
+});
+
+test('a kept server that grows past the memory ceiling starts again before the next description', async t => {
+    // A ceiling above what the fixture holds when started, below it after it grows.
+    const {llama,config}=await fixture(t,'ready',2000,160*2**20);
+    await llama.ensureStarted();
+    const first=llama.child.pid;
+    await llama.ensureStarted();
+    assert.equal(llama.child.pid,first,'below the ceiling it is kept');
+    for (let i=0;i<3;i++) await (await fetch(`${config.modelUrl}/grow`)).text();
+    const lines=[];
+    const log=console.log;
+    console.log=(line)=>lines.push(line);
+    try { await llama.ensureStarted(); } finally { console.log=log; }
+    assert.notEqual(llama.child.pid,first);
+    const recycle=JSON.parse(lines.find(line=>line.includes('descriptor-recycle')));
+    assert.equal(recycle.reason,'memory_ceiling');
+    assert.equal(recycle.descriptionsServed,2);
+    assert.ok(recycle.heldBytes>recycle.limitBytes && recycle.fileBytes>0);
 });
