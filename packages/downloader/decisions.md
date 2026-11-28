@@ -253,8 +253,12 @@ seconds logs `STALE`, a debug line); non-terminal exits retain the recording for
 retry.
 
 A playlist request that has not answered within a second gets a second, identical
-request (`PLAYLIST_HEDGE_MS`); the first answer is used and the other is aborted.
-An aborted request records no failure.
+request (`PLAYLIST_HEDGE_MS`), and another every two seconds after that
+(`PLAYLIST_REHEDGE_MS`), up to fifteen in all (`PLAYLIST_MAX_REQUESTS`): a request sent
+while the route to the site is down stays stalled after the route is back, waiting out
+TCP's growing retransmission delays, while a fresh one answers at once. The first answer
+is used and the others are aborted. An aborted request records no failure. A late poll's
+gap line gives the number of requests its answering poll started (`playlistRequests`).
 
 Segments of a poll are fetched four at a time and saved in playlist order. While
 the loop waits more than a second for a segment, or for the disk to write, flush,

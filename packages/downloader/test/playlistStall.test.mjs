@@ -32,14 +32,14 @@ async function fixture(t, provider) {
 
 const fetchSegment = async url => ({ data: Buffer.from(`unprobeable media: ${url}`) });
 
-// A live window of two one-second segments that moves on every second.
-function movingWindow(endAfterMs) {
+// A live window of one-second segments (two unless given) that moves on every second.
+function movingWindow(endAfterMs, size = 2) {
     const started = performance.now();
     return () => {
         const elapsed = performance.now() - started;
         const first = 10 + Math.floor(elapsed / 1000);
         return `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${first}\n`
-            + [first, first + 1].map(sequence => `#EXTINF:1,\ns${sequence}.ts\n`).join('')
+            + Array.from({ length: size }, (_, index) => first + index).map(sequence => `#EXTINF:1,\ns${sequence}.ts\n`).join('')
             + (elapsed > endAfterMs ? '#EXT-X-ENDLIST\n' : '');
     };
 }
@@ -63,6 +63,32 @@ test('a playlist request that hangs is hedged: a second request answers and the 
     assert.equal(result.exitReason, 'remote-endlist');
     assert.deepEqual(aborted, [3]);
     assert.equal(f.manager.missedSegmentCount, 0);
+});
+
+test('requests sent while the route is down stay stalled; a fresh one after it is back answers in time', { timeout: 30000 }, async (t) => {
+    // A six-segment window, and a route that drops for four seconds from the
+    // third request on. Requests sent meanwhile never answer until their own
+    // fifteen-second timeout, like packets waiting out TCP's retransmission
+    // delays; one sent after the route is back answers at once. Two stalled
+    // requests (one hedge) would leave the poll blind for fifteen seconds,
+    // past the window.
+    const window = movingWindow(9000, 6);
+    let calls = 0, downUntil = 0;
+    const gaps = [];
+    t.mock.method(logger, 'warn', (name) => { if (String(name).includes('SEQUENCE-GAP')) gaps.push(name); });
+    const fetchPlaylist = (url, signal) => {
+        if (++calls === 3) downUntil = performance.now() + 4000;
+        if (performance.now() >= downUntil) return Promise.resolve(window());
+        return new Promise(resolve => {
+            const timer = setTimeout(() => resolve(null), 15000);
+            signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(null); });
+        });
+    };
+    const f = await fixture(t, { refreshMasterDuringDownload: false, createDownloadSession: () => ({ fetchPlaylist, fetchSegment }) });
+    const result = await f.run();
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(f.manager.missedSegmentCount, 0);
+    assert.deepEqual(gaps, []);
 });
 
 test('a slow master check does not hold up playlist polling', { timeout: 20000 }, async (t) => {

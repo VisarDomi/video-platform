@@ -33,6 +33,8 @@ const EDGE_LIVE = "https://media-hls.live-c.example/b-hls-08/9001/9001_720p.m3u8
 test("pin: timing constants", () => {
     assert.equal(timing.RATE_LIMIT_RETRY_MS, 2_000);
     assert.equal(timing.PLAYLIST_HEDGE_MS, 1_000);
+    assert.equal(timing.PLAYLIST_REHEDGE_MS, 2_000);
+    assert.equal(timing.PLAYLIST_MAX_REQUESTS, 15);
     assert.equal(timing.EDGE_RECOVERY_SLEEP_MS, 5_000);
     assert.equal(timing.QUALITY_CHECK_INTERVAL_MS, 10_000);
     assert.equal(timing.STALE_STREAM_TIMEOUT_MS, 60_000);

@@ -10,7 +10,7 @@ import { InitWriteError, type InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult, SegmentValidationResult } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
-import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS, POLL_WHILE_WAITING_MS, PLAYLIST_HEDGE_MS, RATE_LIMIT_RETRY_MS } from "../../common/timing.js";
+import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS, POLL_WHILE_WAITING_MS, PLAYLIST_HEDGE_MS, PLAYLIST_REHEDGE_MS, PLAYLIST_MAX_REQUESTS, RATE_LIMIT_RETRY_MS } from "../../common/timing.js";
 import { AccessIncidentTracker } from "./accessIncidentTracker.js";
 import { PlaylistNotFoundError } from "../core/playlistNotFoundError.js";
 
@@ -121,21 +121,35 @@ export class StreamDownloader {
     }
 
     // A playlist request can stall for seconds while a fresh one answers at
-    // once, and a short-lived stream token can expire in flight. A second request
-    // starts if the first has not answered within PLAYLIST_HEDGE_MS; the first
-    // answer is used and the other request is aborted.
+    // once, and a short-lived stream token can expire in flight. A request
+    // that went out during a dropped route stays stalled after the route is
+    // back (its packets wait out TCP's growing retransmission delays), so
+    // fresh requests keep starting, the first after PLAYLIST_HEDGE_MS and
+    // then every PLAYLIST_REHEDGE_MS, up to PLAYLIST_MAX_REQUESTS. The first
+    // answer is used and the other requests are aborted. playlistRequests
+    // counts the requests the last poll started.
+    private playlistRequests = 0;
     private async fetchPlaylist(session: IDownloadSession, url: string): Promise<string | null> {
         const requests: AbortController[] = [];
-        const request = () => {
-            const controller = new AbortController();
-            requests.push(controller);
-            return session.fetchPlaylist(url, controller.signal);
-        };
         const hedgeTimer = new AbortController();
-        const hedge = timersPromises.setTimeout(PLAYLIST_HEDGE_MS, undefined, { signal: hedgeTimer.signal })
-            .then(request, () => new Promise<never>(() => {}));
         try {
-            return await Promise.race([request(), hedge]);
+            return await new Promise<string | null>((resolve, reject) => {
+                const request = () => {
+                    const controller = new AbortController();
+                    requests.push(controller);
+                    this.playlistRequests = requests.length;
+                    try { session.fetchPlaylist(url, controller.signal).then(resolve, reject); }
+                    catch (error) { reject(error); }
+                };
+                request();
+                void (async () => {
+                    for (let wait = PLAYLIST_HEDGE_MS; requests.length < PLAYLIST_MAX_REQUESTS; wait = PLAYLIST_REHEDGE_MS) {
+                        const due = await timersPromises.setTimeout(wait, true, { signal: hedgeTimer.signal }).catch(() => false);
+                        if (!due) return;
+                        request();
+                    }
+                })();
+            });
         } finally {
             hedgeTimer.abort();
             for (const controller of requests) controller.abort();
@@ -394,6 +408,7 @@ export class StreamDownloader {
             const playlistFetchStartedAt = Date.now();
             let content = await this.fetchPlaylist(session, liveUrl);
             const playlistFetchMs = Date.now() - playlistFetchStartedAt;
+            const playlistRequests = this.playlistRequests;
             if (!content) {
                 const failure = session.getLastPlaylistFailure?.();
                 if (failure) this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, failure);
@@ -459,14 +474,14 @@ export class StreamDownloader {
                 }
             }
 
-            // A late poll's gap reports how long this poll's playlist request took, and the
-            // slowest disk steps since the previous poll (write with its fsyncs, the check,
-            // the playlist append).
+            // A late poll's gap reports how long this poll's playlist request took and how
+            // many requests it started, and the slowest disk steps since the previous poll
+            // (write with its fsyncs, the check, the playlist append).
             const identifiedSegments = await playlistManager.identifyNewSegments(
                 content,
                 (line) => resolveSegmentUrl(liveUrl, line),
                 undefined,
-                `playlistFetch=${playlistFetchMs}ms slowestWrite=${diskTimings.write}ms slowestCheck=${diskTimings.check}ms slowestAppend=${diskTimings.append}ms`
+                `playlistFetch=${playlistFetchMs}ms playlistRequests=${playlistRequests} slowestWrite=${diskTimings.write}ms slowestCheck=${diskTimings.check}ms slowestAppend=${diskTimings.append}ms`
                     + (failedPlaylistPolls.size > 0
                         ? ` failedPlaylistPolls=${[...failedPlaylistPolls].map(([kind, count]) => `${kind}x${count}`).join(",")}` : ""),
             );

@@ -249,3 +249,24 @@ SIGKILL follows ten seconds after the SIGTERM); the pipeline passes its shutdown
 every description and phrase rewrite. The job fails as interrupted and the recording keeps
 its state for the next start; a rewrite cut short this way is no longer taken as a failed
 rewrite that sends the recording back for a new description.
+
+## Two stalled playlist requests that outlasted the route outage
+
+**Symptom.** A few times a week a recording missed 22 to 28 segments at once, with a gap line
+saying the previous poll was 30 to 34 seconds earlier and had got no playlist. Each time the
+host's network monitor saw the same thing a few seconds before: some distant hosts
+unreachable for 15 to 150 seconds while nearby ones answered, and another site's catalog
+request timing out at its connect.
+
+**Cause.** A route outage between the host and the site, outside the host, which lasted
+seconds; the loop's own reaction lasted thirty. The poll's request and its one hedge both
+went out while the route was down. A request that loses its packets keeps waiting on TCP's
+retransmissions, whose delays double each time, so after the route came back neither request
+answered before its own 30-second timeout, while the site's live window holds about six
+seconds.
+
+**Fix.** A poll keeps starting fresh requests while none has answered: the first hedge after a
+second, then one every two seconds, up to fifteen. One sent after the route is back answers
+at once, so a poll is blind for at most two seconds more than the outage. The gap line names
+how many requests the answering poll started. The test replays a six-segment window with a
+route that drops for four seconds; with one hedge it misses ten segments, now none.
