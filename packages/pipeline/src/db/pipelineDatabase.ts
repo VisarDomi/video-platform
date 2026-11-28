@@ -11,7 +11,7 @@ import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
 import { isRemovalPendingStatus, limitedVisibilityWarning, rejectedPhrases } from "../upload/providerWarnings.js";
 import { assertTransition, type PipelineState } from "../domain/states.js";
 import type { ManualPiece } from "../scheduler/orchestrator.js";
-import type { ShortPart } from "../domain/shorts.js";
+import { shortStreamerKey, type ShortPart } from "../domain/shorts.js";
 import { assertUploadProvider, type ActiveUploadProvider } from "../config/uploadProviders.js";
 import type {
     ProviderInventoryEntry,
@@ -488,6 +488,13 @@ export class PipelineDatabase {
                 part.streamerKey, part.destinationProvider, part.aspectRatio, part.durationSeconds, part.playlist);
     }
 
+    // A waiting short's streamer resolved (or changed) after it pooled: its parts not yet
+    // in a batch follow the current key, so they join that streamer's other footage.
+    rekeyUnjoinedShortParts(id: string, streamerKey: string): void {
+        this.database.prepare(`UPDATE short_parts SET streamer_key = ?
+            WHERE recording_id = ? AND batch_id IS NULL AND verified = 0 AND streamer_key <> ?`).run(streamerKey, id, streamerKey);
+    }
+
     deferShortArtifact(id: string, provider: ActiveUploadProvider, now = new Date()): Recording {
         return this.transaction(() => {
             const recording = this.requireRecording(id);
@@ -517,8 +524,8 @@ export class PipelineDatabase {
 
     createShortBatch(input: RecordingInput, provenance: Omit<RecordingProvenance, "recordingId">,
         parts: readonly ShortPart[], now = new Date()): Recording {
-        if (parts.length === 0 || !provenance.streamerId) throw new Error("Short batch needs resolved members");
-        const key = `${input.provider}:${provenance.streamerId}`;
+        if (parts.length === 0) throw new Error("Short batch needs members");
+        const key = shortStreamerKey(input.provider, provenance);
         if (parts.some(p => p.streamerKey !== key || p.destinationProvider !== parts[0].destinationProvider)) {
             throw new Error("A short batch must contain one streamer and destination");
         }
@@ -2407,7 +2414,7 @@ export class PipelineDatabase {
             let released = 0;
             for (const r of this.list("provenance_review_required")) {
                 if (!allowsPlaceholder(this.getProvenance(r.id))) continue;
-                this.updateStateInTransaction(r.id, r.state, "described", "unresolved source reference allowed as TODO LATER", now.toISOString());
+                this.updateStateInTransaction(r.id, r.state, "described", "unresolved source reference uploads as unknown", now.toISOString());
                 released++;
             }
             return released;

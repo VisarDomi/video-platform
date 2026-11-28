@@ -270,3 +270,24 @@ second, then one every two seconds, up to fifteen. One sent after the route is b
 at once, so a poll is blind for at most two seconds more than the outage. The gap line names
 how many requests the answering poll started. The test replays a six-segment window with a
 route that drops for four seconds; with one hedge it misses ten segments, now none.
+
+## Streamers nobody could name
+
+**Symptom.** Recordings whose streamer the server could not name already uploaded with a
+placeholder source, but two kinds still waited for a person: recordings from a site whose
+catalog gives no pages (held in `provenance_review_required`), and shorts, which only joined
+footage of a resolved streamer, so a short under an unknown name waited in `short_waiting`
+for ever. And a name the server failed to answer once (a timeout counts as "not known")
+stayed unknown, because nothing asked again.
+
+**Cause.** Unresolved provenance was treated as a review item; the placeholder had been
+allowed only for the server's "not known" answers, and the short pools were keyed by
+resolved account.
+
+**Fix.** The owner decided every recording uploads, with what is not known written as
+unknown. Any unresolved provenance now uploads; the profile's footer says `Source: unknown`.
+Shorts pool under the identifier they were recorded under and join like any streamer's
+footage. An unresolved streamer is asked again at most hourly before its recording's local
+stages (and while its short waits); when the server names it, the upload carries the real
+source and its unjoined short parts move to that streamer's pool. A recording with no
+provenance row at all is the only one that still waits for resolution.

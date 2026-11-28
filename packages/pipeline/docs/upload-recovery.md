@@ -94,9 +94,13 @@ not validated, so no video exists. The phrases are learned in `rejected_phrases`
 
 ## Source references and artifacts
 
-Identifiers the API server cannot resolve remain honestly unresolved in the provenance table, but upload
-metadata uses `Source: TODO LATER`. No fake account ID or alias is generated. Resolved references remain
-unchanged; other unresolved or missing provenance blocks upload until it is reviewed.
+A streamer the API server cannot name (it does not know the identifier, or its site gives no pages) stays
+honestly unresolved in the provenance table and still uploads: the content profile writes the unknown parts
+(`Source: unknown` in the production profile). No fake account ID or alias is generated. Before a recording's
+local stages the worker asks the server again when the unresolved answer is over an hour old, so a name the
+server has since learned reaches the upload; a recheck the server cannot answer keeps the unknown source.
+Resolved references remain unchanged. Only a recording with no provenance row at all waits, in
+`provenance_review_required`, until it is resolved.
 
 Completed conversions, remuxes and cached artifacts are flushed before the final directory entry is
 committed to the workflow. Interrupted partial outputs are not treated as completed artifacts.

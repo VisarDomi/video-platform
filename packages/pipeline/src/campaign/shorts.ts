@@ -7,7 +7,7 @@ import { destinationFacts } from "../upload/destinationFacts.js";
 import type { PipelineConfig } from "../config.js";
 import type { ActiveUploadProvider } from "../config/uploadProviders.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
-import type { ShortPart } from "../domain/shorts.js";
+import { shortStreamerKey, type ShortPart } from "../domain/shorts.js";
 import type { ProductionArtifactPart, Recording } from "../domain/types.js";
 import type { TargetCatalogResolver } from "../provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
@@ -67,8 +67,7 @@ export async function poolRecordingPart(database: PipelineDatabase, recording: R
         if (selectedPart && group.part !== selectedPart) continue;
         parts.push({ recordingId: recording.id, part: group.part,
             sourceFingerprint: recording.sourceFingerprint,
-            streamerKey: provenance.streamerId ? `${recording.provider}:${provenance.streamerId}`
-                : `unresolved:${recording.provider}:${provenance.observedIdentifier}`, destinationProvider,
+            streamerKey: shortStreamerKey(recording.provider, provenance), destinationProvider,
             aspectRatio: group.displayAspectRatio, durationSeconds: Math.min(group.durationSeconds, actualSeconds ?? Infinity),
             playlist: deriveResolutionPlaylist(analysis, group.indexes) });
     }
@@ -82,7 +81,7 @@ export async function buildShortBatch(database: PipelineDatabase, config: Pipeli
     const first = database.get(parts[0].recordingId);
     if (!first) throw new Error("Joined short has no original recording");
     const provenance = database.getProvenance(first.id);
-    if (!provenance?.streamerId) throw new Error("Joined shorts require a resolved streamer");
+    if (!provenance) throw new Error("Joined shorts require their streamer's provenance");
     const signature = JSON.stringify(parts.map(p => [p.recordingId, p.part, p.sourceFingerprint, p.destinationProvider, p.durationSeconds]));
     const hash = createHash("sha256").update(signature).digest("hex").slice(0, 12);
     // The ledger key: the capture date/name and the members' hash, leaving room for generated
@@ -232,8 +231,9 @@ export async function maintainAutomaticShorts(database: PipelineDatabase, config
         if (!provenance?.streamerId && (!provenance || now.getTime() - Date.parse(provenance.updatedAt) >= 60 * 60_000)) {
             provenance = database.saveProvenance(recording.id, await resolver.resolve(recording, now));
         }
-        if (!provenance?.streamerId) continue;
-        const key = `${recording.provider}:${provenance.streamerId}`;
+        if (!provenance) continue;
+        const key = shortStreamerKey(recording.provider, provenance);
+        database.rekeyUnjoinedShortParts(recording.id, key);
         const group = byStreamer.get(key) ?? [];
         group.push(recording); byStreamer.set(key, group);
     }
@@ -249,7 +249,6 @@ export async function maintainAutomaticShorts(database: PipelineDatabase, config
         }
     }
     const proposed = database.shortParts().filter(p => !p.batchId && !p.verified
-        && !p.streamerKey.startsWith("unresolved:")
         && (p.destinationProvider === provider || minimum === 0));
     const pending: ShortPart[] = [];
     const inspected = new Map<string, boolean>();

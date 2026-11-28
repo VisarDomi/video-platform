@@ -90,7 +90,7 @@ const part=(id,seconds,aspect=16/9,streamer='live-a:alice',destination='video-ho
     sourceFingerprint:'hash',streamerKey:streamer,destinationProvider:destination,aspectRatio:aspect,
     durationSeconds:seconds,playlist:'',batchId:null,verified:false});
 
-test('groups only the same resolved streamer, destination and compatible shape',()=>{
+test('groups only the same streamer, destination and compatible shape',()=>{
     const clips=[part('a',65),part('b',65,16/9,'live-a:bob'),part('c',65,9/16),
         part('d',65,16/9,'live-a:alice','retired'),part('e',65)];
     assert.deepEqual(compatibleShortGroups(clips,121).map(g=>g.map(p=>p.recordingId)),[['a','e']]);
@@ -154,6 +154,38 @@ test('pipeline joins compatible shorts through canonical streamer identity, pres
     const again=await maintainAutomaticShorts(f.database,f.config,f.resolver,new Date(Date.now()+10*60_000));
     assert.equal(again.joined.length,0);
     assert.equal(f.database.shortParts(b.id)[0].batchId,batch.id);
+});
+
+test('shorts the server cannot name join under their observed name and upload with an unknown source',async t=>{
+    const f=await fixture(t);await f.add('ghost');await f.add('ghost');await f.add('other-ghost');
+    const nobody=TargetCatalogResolver.load({resolveIdentifier:async()=>null});
+    const result=await maintainAutomaticShorts(f.database,f.config,nobody);
+    assert.equal(result.joined.length,1,'the lone short under another name keeps waiting');
+    const batch=f.database.get(result.joined[0]);
+    assert.equal(batch.durationSeconds,130);
+    assert.deepEqual(f.database.shortParts(undefined,batch.id).map(p=>p.streamerKey),['unresolved:live-a:ghost','unresolved:live-a:ghost']);
+    const provenance=f.database.getProvenance(batch.id);
+    assert.deepEqual([provenance.status,provenance.streamerId,provenance.observedIdentifier],['review_required',null,'ghost']);
+    await verifyCurrentServerAuthority(batch,f.config,f.database);
+    const metadata=composeUploadMetadata(batch,{output:{title:'A woman at a desk',description:'A woman sits at a desk and talks to the camera for a while.',tags:[]}},provenance);
+    assert.match(metadata.description,/Source: unknown$/);
+});
+
+test('a waiting short whose streamer the server later names moves to that streamer and joins its footage',async t=>{
+    const f=await fixture(t);const early=await f.add('ghost');
+    let known=false;
+    const resolver=TargetCatalogResolver.load({resolveIdentifier:async(_provider,alias)=>known
+        ?{id:'ghost-id',label:alias,channelUrl:'https://live-a.example/ghost-id',aliasUrl:null}:null});
+    const start=new Date();
+    assert.equal((await maintainAutomaticShorts(f.database,f.config,resolver,start)).joined.length,0);
+    // Pooled under the unresolved name, as a batch cancelled before its upload leaves it.
+    await poolRecordingPart(f.database,f.database.get(early.id),'video-host');
+    assert.equal(f.database.shortParts(early.id)[0].streamerKey,'unresolved:live-a:ghost');
+    known=true;await f.add('ghost');
+    const later=await maintainAutomaticShorts(f.database,f.config,resolver,new Date(start.getTime()+61*60_000));
+    assert.equal(later.joined.length,1);
+    assert.equal(f.database.shortParts(early.id)[0].streamerKey,'live-a:ghost-id');
+    assert.equal(f.database.getProvenance(later.joined[0]).streamerUrl,'https://live-a.example/ghost-id');
 });
 
 test('a joined batch is named after its first part: the hash stays in the ledger key only',async t=>{

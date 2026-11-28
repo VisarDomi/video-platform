@@ -137,10 +137,14 @@ dropped**. Source folders and their playlists are never modified.
 The campaign scans exact ready edited-source checkpoints every five minutes,
 including recordings already held by the minimum-duration rule. It parks shorts
 as `short_waiting`, resolves their provider's stable streamer ID, and continues
-other work. No manual join command or additional service is involved.
+other work. No manual join command or additional service is involved. A short whose
+streamer the server cannot name pools under the identifier it was recorded under
+(`unresolved:<provider>:<identifier>`) and is asked about again hourly; its batch
+uploads with an unknown source. Once the server names it, its parts not yet in a batch
+move to that streamer's pool.
 
 `short_parts` stores each source fingerprint, selected shape, duration, derived
-playlist, streamer, destination and eventual batch. Only the same resolved
+playlist, streamer, destination and eventual batch. Only the same
 streamer, source provider, destination and compatible display shapes (at most
 1% difference across the whole group) can join. Portrait and landscape pools
 remain separate. Clips are chronological and assigned once. Insufficient
@@ -499,7 +503,8 @@ npm test -w pipeline
 ```
 
 Inspect the ledger, and list everything that needs a person (blocked
-recordings with reasons, unresolved provenance, `manual_pieces`):
+recordings with reasons, `manual_pieces`) and, for information, the
+unresolved streamers that upload with an unknown source:
 
 ```bash
 npm run status -w pipeline
@@ -569,7 +574,8 @@ npm run process-one -w pipeline
 ```
 
 Refresh provenance, then inspect unresolved identifiers grouped by provider and
-observed folder alias:
+observed folder alias. They upload with an unknown source without either command; an
+override only fills in what is known:
 
 ```bash
 npm run provenance:refresh -w pipeline

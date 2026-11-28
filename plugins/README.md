@@ -246,8 +246,8 @@ package too, named by the sites file's top-level `"contentProfile"` key, and it 
   model's JSON output. The prompt's exact bytes are its version, which keys every cached
   description, so a profile's prompt changes only together with a plan for the old ones.
 - `descriptionFooter(facts)`: the lines under the descriptor's text (for example where and
-  when the recording was made). `facts.sourceUrl` is null while a recording's provenance is
-  unresolved.
+  when the recording was made). `facts.sourceUrl` is null while a recording's streamer is
+  unresolved; such recordings still upload, so the footer says what is unknown.
 - `tags(facts)`: every upload's tags; the descriptor's own tags are never used.
 
 The core keeps the rest: the `[<recording folder>]` stamp at the end of every title (the

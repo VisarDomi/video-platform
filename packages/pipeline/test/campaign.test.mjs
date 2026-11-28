@@ -632,6 +632,70 @@ test("already-discovered recordings missing provenance resolve on demand instead
     assert.equal(database.getProvenance(recording.id)?.status, "resolved");
 });
 
+async function describedWithoutUpload(t, provenance) {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-unknown-source-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const finalizationPath = path.join(root, "finalization.sqlite");
+    const authority = new DatabaseSync(finalizationPath);
+    authority.exec("CREATE TABLE integrity_checkpoints (recording_path TEXT PRIMARY KEY, playlist_fingerprint TEXT NOT NULL, report_json TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT");
+    const sourcePath = await addFinalized(authority, path.join(root, "live-b", "edited"), "2026-01-23 150039 nameless");
+    authority.close();
+    const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
+    t.after(() => database.close());
+    const inspection = await inspectFinalizedRecording(sourcePath, "live-b", "edited");
+    const recording = database.discover(inspection.recording);
+    database.transition(recording.id, "server_ready", "remuxed");
+    const sha256 = "c".repeat(64);
+    database.saveArtifact(recording.id, { path: path.join(root, recording.id + ".mp4"), sizeBytes: 1_000, sha256, validatedAt: "2026-08-12T08:00:00Z" });
+    database.saveDescription(recording.id, {
+        artifactSha256: sha256, promptVersion: "test-v1", fps: 2,
+        output: { title: "Fixture title", description: "Fixture description.", tags: [] },
+        evidencePath: path.join(root, "evidence.json"),
+    });
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v6: test fixture");
+    if (provenance) database.saveProvenance(recording.id, { observedIdentifier: "nameless", status: "review_required",
+        streamerId: null, alias: null, streamerUrl: null, aliasUrl: null, reason: "identifier_not_resolved_by_server", ...provenance });
+    database.setCampaignState("running");
+    const config = { ...pipelineConfig, comparisonTrialOnly: false, automaticShortsEnabled: false,
+        finalizationDatabasePath: finalizationPath, discoveryRoots: [] };
+    return { database, config, recording };
+}
+
+test("a streamer nobody can name still uploads, with an unknown source and no invented account", async (t) => {
+    for (const answer of [null, { id: "7", label: "nameless", channelUrl: null, aliasUrl: null }]) {
+        const { database, config, recording } = await describedWithoutUpload(t);
+        const worker = new CampaignWorker(database, config, TargetCatalogResolver.load({ resolveIdentifier: async () => answer }));
+        const step = await worker.step(new Date("2026-11-25T03:00:00Z"));
+        assert.equal(step.state, "metadata_ready", `server answer ${JSON.stringify(answer)}`);
+        const provenance = database.getProvenance(recording.id);
+        assert.deepEqual([provenance.status, provenance.streamerId, provenance.streamerUrl], ["review_required", null, null]);
+        assert.match(database.getUploadMetadata(recording.id).description, /Source: unknown$/);
+    }
+});
+
+test("an unresolved streamer is asked again after an hour, so a name the server learns reaches the upload", async (t) => {
+    const asked = [];
+    const resolver = TargetCatalogResolver.load({ resolveIdentifier: async (provider, identifier) => {
+        asked.push(identifier);
+        return { id: "42", label: identifier, channelUrl: `https://${provider}.example/42/`, aliasUrl: null };
+    } });
+    const fresh = await describedWithoutUpload(t, { updatedAt: "2026-11-25T02:30:00Z" });
+    assert.equal((await new CampaignWorker(fresh.database, fresh.config, resolver).step(new Date("2026-11-25T03:00:00Z"))).state, "metadata_ready");
+    assert.deepEqual(asked, [], "asked within the hour: the unresolved answer stands");
+    assert.match(fresh.database.getUploadMetadata(fresh.recording.id).description, /Source: unknown$/);
+
+    const stale = await describedWithoutUpload(t, { updatedAt: "2026-11-25T01:59:00Z" });
+    assert.equal((await new CampaignWorker(stale.database, stale.config, resolver).step(new Date("2026-11-25T03:00:00Z"))).state, "metadata_ready");
+    assert.deepEqual(asked, ["nameless"]);
+    assert.equal(stale.database.getProvenance(stale.recording.id).status, "resolved");
+    assert.match(stale.database.getUploadMetadata(stale.recording.id).description, /Source: https:\/\/live-b\.example\/42\/$/);
+
+    const failing = await describedWithoutUpload(t, { updatedAt: "2026-11-25T01:59:00Z" });
+    const broken = TargetCatalogResolver.load({ resolveIdentifier: async () => ({ id: "1", label: "nameless" }) });
+    assert.equal((await new CampaignWorker(failing.database, failing.config, broken).step(new Date("2026-11-25T03:00:00Z"))).state,
+        "metadata_ready", "a recheck the server cannot answer keeps the unknown source");
+});
+
 test("prepare runs one named recording through the local stages to ready, never uploading, and leaves the rest alone", async (t) => {
     const { database, config, resolver, recording } = await campaignWorkerFixture(t);
     const root = path.dirname(path.dirname(path.dirname(recording.sourcePath)));

@@ -19,6 +19,8 @@ import { MetadataRejectedError, ProviderSessionLostError } from "../upload/provi
 import { RESOLUTION_POLICY_VERSION, resolutionPolicyReason } from "../stages/resolutionPolicy.js";
 import { cancelInvalidShortBatch, maintainAutomaticShorts } from "./shorts.js";
 
+const UNRESOLVED_RECHECK_MS = 60 * 60_000;
+
 // First wait after an upload failed before sending anything (a page timeout).
 const PRE_TRANSFER_RETRY_MILLISECONDS = 15 * 60_000;
 
@@ -136,10 +138,18 @@ export class CampaignWorker {
 
     // Recordings already in the ledger without a provenance row (for example, re-queued
     // after a retired upload destination) bypass admit(); resolve them before local stages
-    // so described recordings do not stall in provenance_review_required.
+    // so described recordings do not stall in provenance_review_required. An unresolved
+    // streamer is asked again at most hourly (a server that did not answer, or a catalog
+    // that has since learned the name); until then it uploads with an unknown source.
     private async ensureProvenance(recording: Recording, now: Date): Promise<void> {
-        if (this.database.getProvenance(recording.id)) return;
-        const resolution = await this.resolver.resolve(recording, now);
+        const existing = this.database.getProvenance(recording.id);
+        if (existing && (existing.status !== "review_required"
+            || now.getTime() - Date.parse(existing.updatedAt) < UNRESOLVED_RECHECK_MS)) return;
+        // A failed recheck keeps the unresolved row: the recording still uploads.
+        const resolution = existing
+            ? await this.resolver.resolve(recording, now).catch(() => null)
+            : await this.resolver.resolve(recording, now);
+        if (!resolution) return;
         this.database.saveProvenance(
             recording.id,
             this.database.getProvenanceOverride(recording.provider, resolution.observedIdentifier) ?? resolution,
