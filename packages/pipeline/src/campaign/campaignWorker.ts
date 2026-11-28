@@ -428,8 +428,7 @@ export class CampaignWorker {
         }
         let control = this.database.getCampaignControl();
         const comparison = this.database.getComparisonTrial();
-        const reviewRequired = this.database.listProvenanceReview().length
-            + this.database.list("blocked").length;
+        const reviewRequired = this.database.reviewRequiredCount();
         // With a second uplink (and no trial or comparison run), conversion never waits for
         // uploads: a cooldown or an attention hold holds uploads only.
         const ahead = Boolean(this.config.uplink) && !comparison && !this.config.comparisonTrialOnly && control.trialPerProvider === null;

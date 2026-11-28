@@ -1201,6 +1201,12 @@ export class PipelineDatabase {
         } : null;
     }
 
+    // Recordings that wait on something other than time: blocked ones, and any held for
+    // provenance it could not resolve at all. Unresolved streamers upload, so they are not here.
+    reviewRequiredCount(): number {
+        return this.list("blocked").length + this.list("provenance_review_required").length;
+    }
+
     listProvenanceReview(): RecordingProvenance[] {
         const rows = this.database.prepare(`
             SELECT * FROM recording_provenance

@@ -220,7 +220,8 @@ export function campaignStatus(config: PipelineConfig, now = new Date()): unknow
             uploadCredentialsFile: config.credentialsFilePath,
             counts: Object.entries(Object.groupBy(database.list(), (recording) => recording.state))
                 .map(([state, recordings]) => ({ state, count: recordings?.length ?? 0 })),
-            provenanceReviewRequired: database.listProvenanceReview().length,
+            // Informational: these upload with an unknown source.
+            unresolvedStreamers: database.listProvenanceReview().length,
             uploadConfirmationsDue: database.dueUploadConfirmations().length,
         };
     } finally {
@@ -248,7 +249,7 @@ export async function campaignStep(config: PipelineConfig, options: CampaignStep
                     productionRolloverRequired: true,
                     step: {
                         disposition: "paused",
-                        reviewRequired: database.listProvenanceReview().length,
+                        reviewRequired: database.reviewRequiredCount(),
                     },
                 };
             }

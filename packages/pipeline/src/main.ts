@@ -352,7 +352,8 @@ async function main(): Promise<void> {
                 cleanupEnabled: pipelineConfig.cleanupEnabled,
                 networkUploadsEnabled: pipelineConfig.networkUploadsEnabled,
                 counts,
-                provenanceReviewRequired: database.listProvenanceReview().length,
+                // Informational: these upload with an unknown source.
+                unresolvedStreamers: database.listProvenanceReview().length,
                 uploadConfirmationsDue: database.dueUploadConfirmations().length,
             }, null, 2));
             return;

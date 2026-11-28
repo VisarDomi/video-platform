@@ -670,6 +670,7 @@ test("a streamer nobody can name still uploads, with an unknown source and no in
         const provenance = database.getProvenance(recording.id);
         assert.deepEqual([provenance.status, provenance.streamerId, provenance.streamerUrl], ["review_required", null, null]);
         assert.match(database.getUploadMetadata(recording.id).description, /Source: unknown$/);
+        assert.equal(database.reviewRequiredCount(), 0, "an unnamed streamer waits for nobody");
     }
 });
 
